@@ -37,7 +37,8 @@ HelloCocos/
 ├── assets/              # 游戏资源与脚本（源码目录）
 │   └── scripts/         # TypeScript 脚本
 ├── docs/                # 项目文档
-│   └── lint-and-format.md  # ESLint + Prettier 配置说明
+│   ├── lint-and-format.md  # ESLint + Prettier 配置说明
+│   └── ad-test-scene.md    # 抖音广告回调测试场景说明
 ├── library/             # Cocos 编译缓存（自动生成，勿提交）
 ├── temp/                # 临时文件（自动生成，勿提交）
 ├── profiles/            # 编辑器配置
@@ -73,6 +74,15 @@ npm run format:check
 ```
 
 详细规则说明见 [docs/lint-and-format.md](docs/lint-and-format.md)。
+
+---
+
+## 文档
+
+| 文档 | 说明 |
+|---|---|
+| [docs/lint-and-format.md](docs/lint-and-format.md) | ESLint + Prettier 配置与使用说明 |
+| [docs/ad-test-scene.md](docs/ad-test-scene.md) | 抖音激励视频 & 插屏广告回调测试场景搭建指南 |
 
 ### VS Code 推荐扩展
 
