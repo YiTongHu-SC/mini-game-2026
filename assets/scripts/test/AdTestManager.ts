@@ -15,8 +15,8 @@ import { createMockRewardedVideoAd, createMockInterstitialAd } from './AdMock';
 const TAG = '[AdTest]';
 
 /** 开发用途的广告单元 ID，替换为真实 ID 后可在真机调试 */
-const AD_UNIT_REWARDED = 'YOUR_REWARDED_AD_UNIT_ID';
-const AD_UNIT_INTERSTITIAL = 'YOUR_INTERSTITIAL_AD_UNIT_ID';
+const AD_UNIT_REWARDED = 'o4dsicj0jn0n3gba6r';
+const AD_UNIT_INTERSTITIAL = 'o4dsicj0jn0n3gba6r';
 
 /**
  * 加载并展示激励视频广告

@@ -83,6 +83,7 @@ npm run format:check
 |---|---|
 | [docs/lint-and-format.md](docs/lint-and-format.md) | ESLint + Prettier 配置与使用说明 |
 | [docs/ad-test-scene.md](docs/ad-test-scene.md) | 抖音激励视频 & 插屏广告回调测试场景搭建指南 |
+| [docs/ad-douyin-devtools.md](docs/ad-douyin-devtools.md) | 发布字节跳动小游戏包并在抖音开发者工具中验证广告回调 |
 
 ### VS Code 推荐扩展
 
