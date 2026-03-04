@@ -38,3 +38,10 @@ export { DualGridController } from './DualGridController';
 
 export { BlockManager } from './BlockManager';
 export type { WallEdge } from './BlockManager';
+
+// ── Level system ──
+
+export type { CellCoord, BlockData, LevelData } from './LevelTypes';
+
+export { LevelLoader } from './LevelLoader';
+export type { LevelLoadResult } from './LevelLoader';

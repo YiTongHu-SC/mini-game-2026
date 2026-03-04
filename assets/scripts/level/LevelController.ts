@@ -1,0 +1,448 @@
+/**
+ * LevelController — 关卡场景组件
+ *
+ * 从 Inspector 绑定的 JSON Asset 读取关卡数据，初始化完整的双网格系统。
+ *
+ * 工作流程：
+ *   1. 在 Cocos Creator 编辑器中新建场景（level.scene）
+ *   2. 在 Canvas 下新建空 Node，添加本组件
+ *   3. 将关卡 JSON 文件（如 level-001.json）拖拽到 levelData 属性
+ *   4. 将 16 张 tile SpriteFrame 拖拽到 tileFrames 属性
+ *   5. 运行场景，自动加载关卡数据并初始化网格
+ *
+ * 挂载到一个空 Node 上，该 Node 需要有 UITransform 组件（用于触摸区域）。
+ */
+
+import {
+  _decorator,
+  Component,
+  Node,
+  Sprite,
+  SpriteFrame,
+  EventMouse,
+  UITransform,
+  Vec3,
+  CCInteger,
+  Color,
+  Label,
+  Layers,
+  JsonAsset,
+} from 'cc';
+import { OccupancyGrid } from '../tile-map/OccupancyGrid';
+import { AutoTileResolver } from '../tile-map/AutoTileResolver';
+import { createDefaultConfig } from '../tile-map/TileMapConfig';
+import { VisualTilemapRenderer } from '../tile-map/VisualTilemapRenderer';
+import { DualGridMapper } from '../tile-map/DualGridMapper';
+import { BlockManager } from '../tile-map/BlockManager';
+import { STRIDE, visualGridSize } from '../tile-map/DualGridTypes';
+import { LevelLoader } from '../tile-map/LevelLoader';
+import { LevelData } from '../tile-map/LevelTypes';
+
+const { ccclass, property } = _decorator;
+
+/** Fallback layer value for UI_2D (1 << 25). */
+const UI_2D_LAYER = 1 << 25;
+
+@ccclass('LevelController')
+export class LevelController extends Component {
+  // ── Editor properties ──
+
+  @property({ type: JsonAsset, tooltip: '关卡数据 JSON 文件（LevelData 格式）' })
+  levelData: JsonAsset = null!;
+
+  @property({ type: CCInteger, tooltip: '表现格像素大小（逻辑格视觉大小 = 4 × 此值）' })
+  visualTileSize: number = 24;
+
+  @property({ tooltip: '显示表现格 mask debug 标签' })
+  showDebugMask: boolean = false;
+
+  @property({ tooltip: '显示逻辑网格叠加层' })
+  showLogicOverlay: boolean = false;
+
+  @property({ type: [SpriteFrame], tooltip: 'Tileset sprite frames (16 items, index = mask)' })
+  tileFrames: SpriteFrame[] = [];
+
+  // ── Runtime instances ──
+
+  private logicGrid!: OccupancyGrid;
+  private visualGrid!: OccupancyGrid;
+  private mapper!: DualGridMapper;
+  private resolver!: AutoTileResolver;
+  private renderer!: VisualTilemapRenderer;
+  private blockManager!: BlockManager;
+
+  private logicCols: number = 0;
+  private logicRows: number = 0;
+
+  private overlayNode!: Node;
+  private overlayCells: (Node | null)[][] = [];
+  private wallIndicatorLayer!: Node;
+  private wallIndicators: Map<string, Node> = new Map();
+
+  private _pendingRefresh = 2;
+
+  // ──────────────────── lifecycle ────────────────────
+
+  start(): void {
+    // 1. 验证关卡数据
+    if (!this.levelData || !this.levelData.json) {
+      console.error('[LevelController] levelData is not set or invalid!');
+      return;
+    }
+
+    // 2. 解析关卡 JSON
+    const rawData = this.levelData.json as LevelData;
+    const loadResult = LevelLoader.load(rawData);
+
+    this.logicCols = loadResult.gridCols;
+    this.logicRows = loadResult.gridRows;
+
+    console.log(
+      `[LevelController] Loading level: ${this.logicCols}×${this.logicRows}, ` +
+        `blocks=${rawData.blocks.length}, ` +
+        `occupiedCells=${loadResult.occupiedCells.length}, ` +
+        `walls=${loadResult.walls.length}`,
+    );
+
+    // 3. Logic grid
+    this.logicGrid = new OccupancyGrid(this.logicCols, this.logicRows);
+
+    // 4. Visual grid (derived size)
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    this.visualGrid = new OccupancyGrid(vSize.cols, vSize.rows);
+
+    // 5. Mapper (logic → visual coordination)
+    this.mapper = new DualGridMapper(this.logicCols, this.logicRows);
+
+    // 6. Block / Wall manager
+    this.blockManager = new BlockManager();
+    this.mapper.setBlockManager(this.blockManager);
+
+    // 7. Resolver works on the VISUAL grid
+    this.resolver = new AutoTileResolver(this.visualGrid, createDefaultConfig());
+
+    // 8. Renderer for the visual grid
+    this.renderer = new VisualTilemapRenderer(
+      this.node,
+      vSize.cols,
+      vSize.rows,
+      this.visualTileSize,
+      this.tileFrames,
+      this.showDebugMask,
+    );
+
+    // 9. Resize parent UITransform to cover the full visual grid
+    const ut = this.node.getComponent(UITransform);
+    if (ut) {
+      ut.setContentSize(vSize.cols * this.visualTileSize, vSize.rows * this.visualTileSize);
+    }
+
+    // 10. Build overlay and wall indicator layer
+    this.buildLogicOverlay();
+    this.buildWallIndicatorLayer();
+
+    // 11. 将关卡数据写入网格
+    this.applyLevelData(loadResult);
+
+    // 12. 鼠标输入 — 右键切换逻辑格之间的墙壁
+    this.node.on(Node.EventType.MOUSE_UP, this.onMouseUp, this);
+
+    console.log(`[LevelController] Initialized: visual=${vSize.cols}×${vSize.rows}`);
+  }
+
+  update(): void {
+    if (this._pendingRefresh <= 0) return;
+    this._pendingRefresh--;
+    if (this._pendingRefresh === 0) {
+      // 延迟刷新：等 Cocos 渲染管线注册完动态节点后再刷新
+      this.mapper.syncAll(this.logicGrid, this.visualGrid);
+      this.renderer.refreshAll(this.resolver, this.visualGrid);
+      if (this.showLogicOverlay) this.refreshAllOverlay();
+      console.log('[LevelController] Deferred full refresh done');
+    }
+  }
+
+  // ──────────────────── mouse input ────────────────────
+
+  private onMouseUp(event: EventMouse): void {
+    if (event.getButton() === EventMouse.BUTTON_RIGHT) {
+      this.handleWallToggle(event);
+    }
+  }
+
+  /**
+   * 将鼠标事件的 UI 坐标转换为节点本地空间的像素偏移 (px, py)。
+   * 返回 null 表示无法获取 UITransform。
+   */
+  private mouseToLocalPixel(event: EventMouse): { px: number; py: number } | null {
+    const touchPos = event.getUILocation();
+    const worldPos = new Vec3(touchPos.x, touchPos.y, 0);
+    const ut = this.node.getComponent(UITransform);
+    if (!ut) return null;
+    const localPos = ut.convertToNodeSpaceAR(worldPos);
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const offsetX = (vSize.cols * this.visualTileSize) / 2;
+    const offsetY = (vSize.rows * this.visualTileSize) / 2;
+
+    return { px: localPos.x + offsetX, py: localPos.y + offsetY };
+  }
+
+  /**
+   * 检测右键点击位置是否在两个逻辑格的共享边上，
+   * 如果是，则切换该边上的墙壁状态。
+   *
+   * 如果 vx%4==0 且 vy%4!=0 → V-Edge（左右两个逻辑格之间）
+   * 如果 vx%4!=0 且 vy%4==0 → H-Edge（上下两个逻辑格之间）
+   */
+  private handleWallToggle(event: EventMouse): void {
+    const pixel = this.mouseToLocalPixel(event);
+    if (!pixel) return;
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const vx = Math.floor(pixel.px / this.visualTileSize);
+    const vy = Math.floor(pixel.py / this.visualTileSize);
+
+    if (vx < 0 || vx >= vSize.cols || vy < 0 || vy >= vSize.rows) return;
+
+    const rx = vx % STRIDE;
+    const ry = vy % STRIDE;
+
+    let a: { x: number; y: number } | null = null;
+    let b: { x: number; y: number } | null = null;
+
+    if (rx === 0 && ry !== 0) {
+      // V-Edge → wall between left and right logic cells
+      const lxLeft = vx / STRIDE - 1;
+      const lxRight = vx / STRIDE;
+      const ly = Math.floor(vy / STRIDE);
+      if (lxLeft >= 0 && lxRight < this.logicCols && ly >= 0 && ly < this.logicRows) {
+        a = { x: lxLeft, y: ly };
+        b = { x: lxRight, y: ly };
+      }
+    } else if (rx !== 0 && ry === 0) {
+      // H-Edge → wall between bottom and top logic cells
+      const lx = Math.floor(vx / STRIDE);
+      const lyBottom = vy / STRIDE - 1;
+      const lyTop = vy / STRIDE;
+      if (lx >= 0 && lx < this.logicCols && lyBottom >= 0 && lyTop < this.logicRows) {
+        a = { x: lx, y: lyBottom };
+        b = { x: lx, y: lyTop };
+      }
+    }
+
+    if (!a || !b) return;
+
+    // Toggle wall
+    const hasWall = this.blockManager.toggleWall(a, b);
+    if (hasWall === null) return;
+
+    // Sync visual grid
+    const dirty = this.mapper.syncWallChange(a, b, this.logicGrid, this.visualGrid);
+    this.renderer.refreshLocal(dirty, this.resolver, this.visualGrid);
+
+    // Update wall indicator
+    this.updateWallIndicator(a, b, hasWall);
+
+    console.log(
+      `[LevelController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
+        `refreshed ${dirty.length} visual cells`,
+    );
+  }
+
+  // ──────────────────── level data application ────────────────────
+
+  /**
+   * 将解析结果写入逻辑网格和 BlockManager。
+   */
+  private applyLevelData(loadResult: ReturnType<typeof LevelLoader.load>): void {
+    // 写入已占用格
+    for (const cell of loadResult.occupiedCells) {
+      this.logicGrid.setCell(cell.x, cell.y, 1);
+    }
+    this.logicGrid.getDirtyAndClear(); // 清除 dirty 标记，后续全量 sync
+
+    // 写入 wall
+    for (const [a, b] of loadResult.walls) {
+      this.blockManager.addWall(a, b);
+      this.addWallIndicator(a, b);
+    }
+
+    // 同步逻辑网格到表现网格（全量）
+    this.mapper.syncAll(this.logicGrid, this.visualGrid);
+
+    // 刷新由 update() 延迟执行（给 Cocos 注册动态节点的时间）
+  }
+
+  // ──────────────────── logic overlay ────────────────────
+
+  private buildLogicOverlay(): void {
+    this.overlayNode = new Node('LogicOverlay');
+    const layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    this.overlayNode.layer = layer;
+    this.overlayNode.parent = this.node;
+    this.overlayNode.setPosition(Vec3.ZERO);
+    this.overlayNode.active = this.showLogicOverlay;
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const logicCellPixelSize = STRIDE * this.visualTileSize;
+
+    this.overlayCells = [];
+
+    for (let ly = 0; ly < this.logicRows; ly++) {
+      const row: (Node | null)[] = [];
+      for (let lx = 0; lx < this.logicCols; lx++) {
+        const cellNode = new Node(`logic_${lx}_${ly}`);
+        cellNode.layer = layer;
+        cellNode.parent = this.overlayNode;
+
+        const centerVx = lx * STRIDE + 2;
+        const centerVy = ly * STRIDE + 2;
+        const px = renderOffsetX + centerVx * this.visualTileSize;
+        const py = renderOffsetY + centerVy * this.visualTileSize;
+        cellNode.setPosition(new Vec3(px, py, 0));
+
+        const cellUT = cellNode.addComponent(UITransform);
+        cellUT.setContentSize(logicCellPixelSize, logicCellPixelSize);
+
+        const sprite = cellNode.addComponent(Sprite);
+        sprite.type = Sprite.Type.SIMPLE;
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        sprite.spriteFrame = null;
+        sprite.color = new Color(100, 100, 100, 80);
+
+        const labelNode = new Node('logicLabel');
+        labelNode.layer = layer;
+        labelNode.parent = cellNode;
+        labelNode.setPosition(Vec3.ZERO);
+        const labelUT = labelNode.addComponent(UITransform);
+        labelUT.setContentSize(logicCellPixelSize, logicCellPixelSize);
+        const label = labelNode.addComponent(Label);
+        label.fontSize = 14;
+        label.color = new Color(255, 255, 255, 180);
+        label.string = `${lx},${ly}`;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+
+        row.push(cellNode);
+      }
+      this.overlayCells.push(row);
+    }
+  }
+
+  private updateOverlayCell(lx: number, ly: number, value: 0 | 1): void {
+    const node = this.overlayCells[ly]?.[lx];
+    if (!node) return;
+    const sprite = node.getComponent(Sprite);
+    if (!sprite) return;
+    sprite.color = value === 1 ? new Color(0, 180, 0, 100) : new Color(100, 100, 100, 80);
+  }
+
+  private refreshAllOverlay(): void {
+    for (let ly = 0; ly < this.logicRows; ly++) {
+      for (let lx = 0; lx < this.logicCols; lx++) {
+        this.updateOverlayCell(lx, ly, this.logicGrid.getCell(lx, ly));
+      }
+    }
+  }
+
+  /** 切换逻辑叠加层显示。可绑定到 UI 按钮。 */
+  toggleLogicOverlay(): void {
+    this.showLogicOverlay = !this.showLogicOverlay;
+    this.overlayNode.active = this.showLogicOverlay;
+    if (this.showLogicOverlay) this.refreshAllOverlay();
+    console.log(`[LevelController] Logic overlay: ${this.showLogicOverlay}`);
+  }
+
+  // ──────────────────── wall indicator layer ────────────────────
+
+  private buildWallIndicatorLayer(): void {
+    this.wallIndicatorLayer = new Node('WallIndicators');
+    const layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    this.wallIndicatorLayer.layer = layer;
+    this.wallIndicatorLayer.parent = this.node;
+    this.wallIndicatorLayer.setPosition(Vec3.ZERO);
+  }
+
+  /**
+   * 更新单个墙壁的可视指示器。
+   * 有墙 → 创建红色半透明矩形；无墙 → 移除指示器节点。
+   */
+  private updateWallIndicator(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    hasWall: boolean,
+  ): void {
+    const key = BlockManager.wallKey(a, b);
+    if (key === null) return;
+
+    if (!hasWall) {
+      const existing = this.wallIndicators.get(key);
+      if (existing) {
+        existing.destroy();
+        this.wallIndicators.delete(key);
+      }
+      return;
+    }
+
+    this.addWallIndicator(a, b);
+  }
+
+  /**
+   * 为一条 wall 创建红色半透明可视指示器（仅添加，不处理移除）。
+   */
+  private addWallIndicator(a: { x: number; y: number }, b: { x: number; y: number }): void {
+    const key = BlockManager.wallKey(a, b);
+    if (key === null || this.wallIndicators.has(key)) return;
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const layerVal = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    let centerVx: number;
+    let centerVy: number;
+    let width: number;
+    let height: number;
+
+    if (dx !== 0) {
+      // Horizontal adjacency — V-Edge wall (vertical bar)
+      const left = dx > 0 ? a : b;
+      centerVx = (left.x + 1) * STRIDE;
+      centerVy = left.y * STRIDE + 2;
+      width = this.visualTileSize;
+      height = this.visualTileSize * 3;
+    } else {
+      // Vertical adjacency — H-Edge wall (horizontal bar)
+      const bottom = dy > 0 ? a : b;
+      centerVx = bottom.x * STRIDE + 2;
+      centerVy = (bottom.y + 1) * STRIDE;
+      width = this.visualTileSize * 3;
+      height = this.visualTileSize;
+    }
+
+    const node = new Node(`wall_${key}`);
+    node.layer = layerVal;
+    node.parent = this.wallIndicatorLayer;
+
+    const px = renderOffsetX + centerVx * this.visualTileSize;
+    const py = renderOffsetY + centerVy * this.visualTileSize;
+    node.setPosition(new Vec3(px, py, 0));
+
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(width, height);
+
+    const sprite = node.addComponent(Sprite);
+    sprite.type = Sprite.Type.SIMPLE;
+    sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+    sprite.spriteFrame = null;
+    sprite.color = new Color(255, 50, 50, 150); // 红色半透明
+
+    this.wallIndicators.set(key, node);
+  }
+}
