@@ -4,6 +4,14 @@
 
   /* Add your custom configuration here. */
   "compilerOptions": {
-    "strict": false
-  }
+    "strict": false,
+    "types": [
+      "./temp/declarations/jsb",
+      "./temp/declarations/cc",
+      "./temp/declarations/cc.custom-macro",
+      "./temp/declarations/cc.env",
+      "jest"
+    ]
+  },
+  "exclude": ["assets/scripts/tile-map/__tests__/**"]
 }
