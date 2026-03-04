@@ -33,3 +33,8 @@ export type { VisualCellType, VisualCellInfo, OccupancyRule } from './DualGridTy
 export { DualGridMapper } from './DualGridMapper';
 
 export { DualGridController } from './DualGridController';
+
+// ── Block / Wall system ──
+
+export { BlockManager } from './BlockManager';
+export type { WallEdge } from './BlockManager';

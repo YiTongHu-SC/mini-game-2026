@@ -16,7 +16,7 @@ import {
   Node,
   Sprite,
   SpriteFrame,
-  EventTouch,
+  EventMouse,
   UITransform,
   Vec3,
   CCInteger,
@@ -29,6 +29,7 @@ import { AutoTileResolver } from './AutoTileResolver';
 import { createDefaultConfig } from './TileMapConfig';
 import { VisualTilemapRenderer } from './VisualTilemapRenderer';
 import { DualGridMapper } from './DualGridMapper';
+import { BlockManager } from './BlockManager';
 import { STRIDE, visualGridSize } from './DualGridTypes';
 
 const { ccclass, property } = _decorator;
@@ -68,6 +69,10 @@ export class DualGridController extends Component {
   private overlayNode!: Node;
   private overlayCells: (Node | null)[][] = [];
   private _pendingRefresh = 2;
+  private blockManager!: BlockManager;
+  private wallIndicatorLayer!: Node;
+  /** Map from wall key → indicator Node */
+  private wallIndicators: Map<string, Node> = new Map();
 
   // ──────────────────── lifecycle ────────────────────
 
@@ -81,6 +86,10 @@ export class DualGridController extends Component {
 
     // 3. Mapper (logic → visual coordination)
     this.mapper = new DualGridMapper(this.logicCols, this.logicRows);
+
+    // 3b. Block/Wall manager
+    this.blockManager = new BlockManager();
+    this.mapper.setBlockManager(this.blockManager);
 
     // 4. Resolver works on the VISUAL grid
     this.resolver = new AutoTileResolver(this.visualGrid, createDefaultConfig());
@@ -104,11 +113,14 @@ export class DualGridController extends Component {
     // 7. Build logic overlay
     this.buildLogicOverlay();
 
+    // 7b. Build wall indicator layer
+    this.buildWallIndicatorLayer();
+
     // 8. Load default test pattern and do initial sync
     this.loadTestPattern();
 
-    // 9. Enable touch input
-    this.node.on(Node.EventType.TOUCH_END, this.onTouch, this);
+    // 9. Mouse input — left-click: toggle logic cell, right-click: toggle wall
+    this.node.on(Node.EventType.MOUSE_UP, this.onMouseUp, this);
 
     console.log(
       `[DualGridController] Initialized logic=${this.logicCols}×${this.logicRows}, ` +
@@ -127,34 +139,55 @@ export class DualGridController extends Component {
     }
   }
 
-  // ──────────────────── touch input ────────────────────
+  // ──────────────────── mouse input ────────────────────
 
-  private onTouch(event: EventTouch): void {
+  /**
+   * 统一鼠标输入处理：
+   *   - 左键（BUTTON_LEFT）→ 切换逻辑格占用状态
+   *   - 右键（BUTTON_RIGHT）→ 切换相邻逻辑格之间的墙壁
+   */
+  private onMouseUp(event: EventMouse): void {
+    const button = event.getButton();
+    if (button === EventMouse.BUTTON_LEFT) {
+      this.handleLogicToggle(event);
+    } else if (button === EventMouse.BUTTON_RIGHT) {
+      this.handleWallToggle(event);
+    }
+  }
+
+  /**
+   * 将鼠标事件的 UI 坐标转换为节点本地空间的像素偏移 (px, py)。
+   * 返回 null 表示无法获取 UITransform。
+   */
+  private mouseToLocalPixel(event: EventMouse): { px: number; py: number } | null {
     const touchPos = event.getUILocation();
     const worldPos = new Vec3(touchPos.x, touchPos.y, 0);
     const ut = this.node.getComponent(UITransform);
-    if (!ut) return;
+    if (!ut) return null;
     const localPos = ut.convertToNodeSpaceAR(worldPos);
 
     const vSize = visualGridSize(this.logicCols, this.logicRows);
     const offsetX = (vSize.cols * this.visualTileSize) / 2;
     const offsetY = (vSize.rows * this.visualTileSize) / 2;
 
-    // Convert touch to logic grid coordinates
-    // Logic cell (lx,ly) center is at visual cell (lx*4+2, ly*4+2).
-    // In pixel space from left edge: (lx*4+2+0.5) * visualTileSize.
-    // Mapping: lx = floor((px - 0.5*vts) / (STRIDE*vts)), clamped.
-    const px = localPos.x + offsetX;
-    const py = localPos.y + offsetY;
+    return { px: localPos.x + offsetX, py: localPos.y + offsetY };
+  }
+
+  // ──────────────────── left-click: logic toggle ────────────────────
+
+  private handleLogicToggle(event: EventMouse): void {
+    const pixel = this.mouseToLocalPixel(event);
+    if (!pixel) return;
+
     const logicCellSize = STRIDE * this.visualTileSize;
     const halfVts = this.visualTileSize * 0.5;
     const lx = Math.max(
       0,
-      Math.min(this.logicCols - 1, Math.floor((px - halfVts) / logicCellSize)),
+      Math.min(this.logicCols - 1, Math.floor((pixel.px - halfVts) / logicCellSize)),
     );
     const ly = Math.max(
       0,
-      Math.min(this.logicRows - 1, Math.floor((py - halfVts) / logicCellSize)),
+      Math.min(this.logicRows - 1, Math.floor((pixel.py - halfVts) / logicCellSize)),
     );
 
     // Toggle logic cell
@@ -172,6 +205,70 @@ export class DualGridController extends Component {
 
     console.log(
       `[DualGridController] Toggled logic (${lx},${ly}) → ${newVal}, ` +
+        `refreshed ${dirty.length} visual cells`,
+    );
+  }
+
+  // ──────────────────── right-click: wall toggle ────────────────────
+
+  /**
+   * 检测点击位置是否在两个逻辑格的共享边上，
+   * 如果是，则切换该边上的墙壁状态。
+   *
+   * 如果 vx%4==0 且 vy%4!=0 → V-Edge（左右两个逻辑格之间）
+   * 如果 vx%4!=0 且 vy%4==0 → H-Edge（上下两个逻辑格之间）
+   */
+  private handleWallToggle(event: EventMouse): void {
+    const pixel = this.mouseToLocalPixel(event);
+    if (!pixel) return;
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const vx = Math.floor(pixel.px / this.visualTileSize);
+    const vy = Math.floor(pixel.py / this.visualTileSize);
+
+    if (vx < 0 || vx >= vSize.cols || vy < 0 || vy >= vSize.rows) return;
+
+    const rx = vx % STRIDE;
+    const ry = vy % STRIDE;
+
+    let a: { x: number; y: number } | null = null;
+    let b: { x: number; y: number } | null = null;
+
+    if (rx === 0 && ry !== 0) {
+      // V-Edge → wall between left and right logic cells
+      const lxLeft = vx / STRIDE - 1;
+      const lxRight = vx / STRIDE;
+      const ly = Math.floor(vy / STRIDE);
+      if (lxLeft >= 0 && lxRight < this.logicCols && ly >= 0 && ly < this.logicRows) {
+        a = { x: lxLeft, y: ly };
+        b = { x: lxRight, y: ly };
+      }
+    } else if (rx !== 0 && ry === 0) {
+      // H-Edge → wall between bottom and top logic cells
+      const lx = Math.floor(vx / STRIDE);
+      const lyBottom = vy / STRIDE - 1;
+      const lyTop = vy / STRIDE;
+      if (lx >= 0 && lx < this.logicCols && lyBottom >= 0 && lyTop < this.logicRows) {
+        a = { x: lx, y: lyBottom };
+        b = { x: lx, y: lyTop };
+      }
+    }
+
+    if (!a || !b) return;
+
+    // Toggle wall
+    const hasWall = this.blockManager.toggleWall(a, b);
+    if (hasWall === null) return;
+
+    // Sync visual grid
+    const dirty = this.mapper.syncWallChange(a, b, this.logicGrid, this.visualGrid);
+    this.renderer.refreshLocal(dirty, this.resolver, this.visualGrid);
+
+    // Update wall indicator
+    this.updateWallIndicator(a, b, hasWall);
+
+    console.log(
+      `[DualGridController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
         `refreshed ${dirty.length} visual cells`,
     );
   }
@@ -262,6 +359,100 @@ export class DualGridController extends Component {
     }
   }
 
+  // ──────────────────── wall indicator layer ────────────────────
+
+  /** 创建墙壁指示器父节点。 */
+  private buildWallIndicatorLayer(): void {
+    this.wallIndicatorLayer = new Node('WallIndicators');
+    const layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    this.wallIndicatorLayer.layer = layer;
+    this.wallIndicatorLayer.parent = this.node;
+    this.wallIndicatorLayer.setPosition(Vec3.ZERO);
+  }
+
+  /**
+   * 更新单个墙壁的可视指示器。
+   * 有墙 → 创建/显示红色半透明矩形
+   * 无墙 → 移除指示器节点
+   */
+  private updateWallIndicator(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    hasWall: boolean,
+  ): void {
+    const key = BlockManager.wallKey(a, b);
+    if (key === null) return;
+
+    if (!hasWall) {
+      // Remove indicator
+      const existing = this.wallIndicators.get(key);
+      if (existing) {
+        existing.destroy();
+        this.wallIndicators.delete(key);
+      }
+      return;
+    }
+
+    // Create indicator if needed
+    if (this.wallIndicators.has(key)) return;
+
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const layerVal = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    let centerVx: number;
+    let centerVy: number;
+    let width: number;
+    let height: number;
+
+    if (dx !== 0) {
+      // Horizontal adjacency — V-Edge wall (vertical line)
+      const left = dx > 0 ? a : b;
+      centerVx = (left.x + 1) * STRIDE;
+      centerVy = left.y * STRIDE + 2; // center of the 3 edge cells
+      width = this.visualTileSize;
+      height = this.visualTileSize * 3;
+    } else {
+      // Vertical adjacency — H-Edge wall (horizontal line)
+      const bottom = dy > 0 ? a : b;
+      centerVx = bottom.x * STRIDE + 2;
+      centerVy = (bottom.y + 1) * STRIDE;
+      width = this.visualTileSize * 3;
+      height = this.visualTileSize;
+    }
+
+    const node = new Node(`wall_${key}`);
+    node.layer = layerVal;
+    node.parent = this.wallIndicatorLayer;
+
+    const px = renderOffsetX + centerVx * this.visualTileSize;
+    const py = renderOffsetY + centerVy * this.visualTileSize;
+    node.setPosition(new Vec3(px, py, 0));
+
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(width, height);
+
+    const sprite = node.addComponent(Sprite);
+    sprite.type = Sprite.Type.SIMPLE;
+    sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+    sprite.spriteFrame = null;
+    sprite.color = new Color(255, 50, 50, 150); // Red semi-transparent
+
+    this.wallIndicators.set(key, node);
+  }
+
+  /** 清除所有墙壁指示器。 */
+  private clearWallIndicators(): void {
+    for (const node of this.wallIndicators.values()) {
+      node.destroy();
+    }
+    this.wallIndicators.clear();
+  }
+
   // ──────────────────── public actions ────────────────────
 
   /** Toggle logic overlay visibility. Bind to a UI button. */
@@ -277,6 +468,8 @@ export class DualGridController extends Component {
   /** Clear the entire grid. Bind to a UI button. */
   clearGrid(): void {
     this.logicGrid.clear();
+    this.blockManager.clearWalls();
+    this.clearWallIndicators();
     this.mapper.syncAll(this.logicGrid, this.visualGrid);
     this.renderer.refreshAll(this.resolver, this.visualGrid);
     this.refreshAllOverlay();
@@ -290,6 +483,8 @@ export class DualGridController extends Component {
    */
   loadTestPattern(): void {
     this.logicGrid.clear();
+    this.blockManager.clearWalls();
+    this.clearWallIndicators();
 
     // Place a 3×3 block centered in the logic grid
     const cx = Math.floor(this.logicCols / 2);

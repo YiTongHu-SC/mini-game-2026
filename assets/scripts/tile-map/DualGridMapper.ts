@@ -12,6 +12,7 @@
 
 import { OccupancyGrid, GridCoord } from './OccupancyGrid';
 import { STRIDE, VisualCellInfo, OccupancyRule, visualGridSize } from './DualGridTypes';
+import { BlockManager } from './BlockManager';
 
 export class DualGridMapper {
   readonly logicCols: number;
@@ -19,6 +20,7 @@ export class DualGridMapper {
   readonly visualCols: number;
   readonly visualRows: number;
   private rule: OccupancyRule;
+  private blockManager: BlockManager | null = null;
 
   constructor(logicCols: number, logicRows: number, rule: OccupancyRule = 'and') {
     this.logicCols = logicCols;
@@ -27,6 +29,11 @@ export class DualGridMapper {
     this.visualCols = size.cols;
     this.visualRows = size.rows;
     this.rule = rule;
+  }
+
+  /** 设置 BlockManager 实例以启用墙壁感知的占用计算。 */
+  setBlockManager(bm: BlockManager | null): void {
+    this.blockManager = bm;
   }
 
   // ──────────────────── classification ────────────────────
@@ -106,6 +113,11 @@ export class DualGridMapper {
    * AND 规则（默认）：所有关联逻辑格都 occupied → 1，否则 → 0
    * OR 规则：任一关联逻辑格 occupied → 1，否则 → 0
    *
+   * 墙壁感知（仅 AND 规则，需 setBlockManager）：
+   *   - Edge：两侧逻辑格之间有墙 → 0
+   *   - Corner：4 个关联逻辑格中的任意相邻对之间有墙 → 0
+   *     角的 4 对相邻关系：BL↔BR, TL↔TR, BL↔TL, BR↔TR
+   *
    * 越界逻辑格由 OccupancyGrid.getCell 返回 0，
    * 因此边界上的 edge/corner 在 AND 模式下永远为 0。
    */
@@ -114,9 +126,33 @@ export class DualGridMapper {
     const neighbors = info.logicNeighbors;
 
     if (this.rule === 'and') {
+      // All neighbors must be occupied
       for (const n of neighbors) {
         if (logicGrid.getCell(n.x, n.y) === 0) return 0;
       }
+
+      // Wall check (only when blockManager is set)
+      if (this.blockManager) {
+        if (info.type === 'v-edge' || info.type === 'h-edge') {
+          // Edge: check wall between the two neighbors
+          if (this.blockManager.hasWall(neighbors[0], neighbors[1])) return 0;
+        } else if (info.type === 'corner') {
+          // Corner: 4 neighbors = [BL, BR, TL, TR]
+          // Check all 4 adjacent pairs among them:
+          //   BL↔BR (horizontal bottom), TL↔TR (horizontal top)
+          //   BL↔TL (vertical left), BR↔TR (vertical right)
+          const [bl, br, tl, tr] = neighbors;
+          if (
+            this.blockManager.hasWall(bl, br) ||
+            this.blockManager.hasWall(tl, tr) ||
+            this.blockManager.hasWall(bl, tl) ||
+            this.blockManager.hasWall(br, tr)
+          ) {
+            return 0;
+          }
+        }
+      }
+
       return 1;
     } else {
       for (const n of neighbors) {
@@ -206,6 +242,70 @@ export class DualGridMapper {
     visualGrid: OccupancyGrid,
   ): GridCoord[] {
     const affected = this.getAffectedVisualCells(lx, ly);
+    for (const { x, y } of affected) {
+      const occ = this.computeVisualOccupancy(x, y, logicGrid);
+      visualGrid.setCell(x, y, occ);
+    }
+    return visualGrid.getDirtyAndClear();
+  }
+
+  // ──────────────────── wall-related sync ────────────────────
+
+  /**
+   * 获取当墙壁 (a, b) 变化时需要重算的表现格坐标。
+   *
+   * 水平墙 (a 和 b 横向相邻)：3 个 V-Edge + 2 个 Corner = 5
+   * 垂直墙 (a 和 b 纵向相邻)：3 个 H-Edge + 2 个 Corner = 5
+   */
+  getAffectedVisualCellsForWall(a: GridCoord, b: GridCoord): GridCoord[] {
+    if (!BlockManager.isAdjacent(a, b)) return [];
+
+    const result: GridCoord[] = [];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    if (dx !== 0) {
+      // Horizontal adjacency → shared V-Edge column
+      // a is left, b is right (or vice versa)
+      const left = dx > 0 ? a : b;
+      const vx = (left.x + 1) * STRIDE; // shared v-edge column
+      const baseY = left.y * STRIDE;
+      // 3 v-edge cells
+      for (let i = 1; i <= 3; i++) {
+        this.pushIfValid(result, vx, baseY + i);
+      }
+      // 2 corner cells
+      this.pushIfValid(result, vx, baseY); // bottom corner
+      this.pushIfValid(result, vx, baseY + STRIDE); // top corner
+    } else {
+      // Vertical adjacency → shared H-Edge row
+      // a is bottom, b is top (or vice versa)
+      const bottom = dy > 0 ? a : b;
+      const vy = (bottom.y + 1) * STRIDE; // shared h-edge row
+      const baseX = bottom.x * STRIDE;
+      // 3 h-edge cells
+      for (let i = 1; i <= 3; i++) {
+        this.pushIfValid(result, baseX + i, vy);
+      }
+      // 2 corner cells
+      this.pushIfValid(result, baseX, vy); // left corner
+      this.pushIfValid(result, baseX + STRIDE, vy); // right corner
+    }
+
+    return result;
+  }
+
+  /**
+   * 局部同步：当墙壁 (a, b) 变化后，更新受影响的表现格。
+   * 返回 visualGrid 产生的脏格列表，可直接传给 renderer.refreshLocal()。
+   */
+  syncWallChange(
+    a: GridCoord,
+    b: GridCoord,
+    logicGrid: OccupancyGrid,
+    visualGrid: OccupancyGrid,
+  ): GridCoord[] {
+    const affected = this.getAffectedVisualCellsForWall(a, b);
     for (const { x, y } of affected) {
       const occ = this.computeVisualOccupancy(x, y, logicGrid);
       visualGrid.setCell(x, y, occ);
