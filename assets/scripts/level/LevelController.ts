@@ -27,6 +27,9 @@ import {
   Label,
   Layers,
   JsonAsset,
+  Graphics,
+  input,
+  Input,
 } from 'cc';
 import { OccupancyGrid } from '../tile-map/OccupancyGrid';
 import { AutoTileResolver } from '../tile-map/AutoTileResolver';
@@ -51,11 +54,10 @@ interface DragState {
   originalCells: CellCoord[];
   /** 被点击的逻辑格 */
   anchorCell: { x: number; y: number };
-  /**
-   * 鼠标按下点相对 anchorCell 中心的节点本地坐标偏移。
-   * ghostLayer 位置 = 当前鼠标本地坐标 - anchorPixelOffset
-   */
-  anchorPixelOffset: { x: number; y: number };
+  /** 拖拽开始时的鼠标本地居中坐标 */
+  startMouseLocal: { x: number; y: number };
+  /** 被拖拽的表现格节点及其原始位置 */
+  draggedNodes: { node: Node; origX: number; origY: number }[];
 }
 
 /** Fallback layer value for UI_2D (1 << 25). */
@@ -100,7 +102,6 @@ export class LevelController extends Component {
   // ── Drag & Drop ──
   private blockRegistry!: BlockRegistry;
   private dragState: DragState | null = null;
-  private ghostLayer!: Node;
   private dropPreviewLayer!: Node;
 
   private _pendingRefresh = 2;
@@ -171,9 +172,11 @@ export class LevelController extends Component {
     this.applyLevelData(loadResult);
 
     // 12. 鼠标输入
-    this.node.on(Node.EventType.MOUSE_DOWN, this.onMouseDown, this);
-    this.node.on(Node.EventType.MOUSE_MOVE, this.onMouseMove, this);
-    this.node.on(Node.EventType.MOUSE_UP, this.onMouseUp, this);
+    // 全部注册在全局 input 上。若混用 node.on(MOUSE_DOWN) + input.on(MOUSE_MOVE)，
+    // Cocos 3.8 UIInputManager 会在鼠标处于节点区域内时吞噬 MOUSE_MOVE，导致拖拽失效。
+    input.on(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+    input.on(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
+    input.on(Input.EventType.MOUSE_UP, this.onMouseUp, this);
 
     console.log(`[LevelController] Initialized: visual=${vSize.cols}×${vSize.rows}`);
   }
@@ -196,6 +199,14 @@ export class LevelController extends Component {
     if (event.getButton() !== EventMouse.BUTTON_LEFT) return;
     const local = this.mouseToLocalCentered(event);
     if (!local) return;
+
+    // 全局 input 事件需手动做边界检测（替代 node-level 的自动命中测试）
+    const ut = this.node.getComponent(UITransform);
+    if (!ut) return;
+    const halfW = ut.contentSize.width / 2;
+    const halfH = ut.contentSize.height / 2;
+    if (local.x < -halfW || local.x > halfW || local.y < -halfH || local.y > halfH) return;
+
     const pixel = this.mouseToLocalPixel(event);
     if (!pixel) return;
 
@@ -204,26 +215,37 @@ export class LevelController extends Component {
     if (!blockId) return;
 
     const originalCells = this.blockRegistry.getBlockCells(blockId);
-    const anchorCenter = this.logicCellCenterLocal(lx, ly);
-    const anchorPixelOffset = { x: local.x - anchorCenter.x, y: local.y - anchorCenter.y };
 
-    // 高亮 block 的所有表现格（蓝色 tint）
-    this.setBlockTint(originalCells, new Color(100, 150, 255, 220));
+    // 收集 block 所有表现格节点及其原始位置，用于像素级偏移
+    const draggedNodes: { node: Node; origX: number; origY: number }[] = [];
+    const visited = new Set<string>();
+    for (const cell of originalCells) {
+      for (const vc of this.mapper.getAffectedVisualCells(cell.x, cell.y)) {
+        const key = `${vc.x},${vc.y}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        const node = this.renderer.getNodeAt(vc.x, vc.y);
+        if (node) {
+          const pos = node.getPosition();
+          draggedNodes.push({ node, origX: pos.x, origY: pos.y });
+        }
+      }
+    }
 
-    // 创建 ghost 节点
-    this.buildGhostNodes(originalCells, { x: lx, y: ly });
-    this.ghostLayer.setPosition(new Vec3(anchorCenter.x, anchorCenter.y, 0));
-    this.ghostLayer.active = true;
     this.dropPreviewLayer.active = true;
 
     this.dragState = {
       blockId,
       originalCells,
       anchorCell: { x: lx, y: ly },
-      anchorPixelOffset,
+      startMouseLocal: { x: local.x, y: local.y },
+      draggedNodes,
     };
 
-    console.log(`[LevelController] Drag start: block='${blockId}', anchor=(${lx},${ly})`);
+    console.log(
+      `[LevelController] Drag start: block='${blockId}', anchor=(${lx},${ly}), ` +
+        `visualNodes=${draggedNodes.length}`,
+    );
   }
 
   private onMouseMove(event: EventMouse): void {
@@ -232,11 +254,12 @@ export class LevelController extends Component {
     const local = this.mouseToLocalCentered(event);
     if (!local) return;
 
-    // Ghost 跟随鼠标（像素级）
-    const { anchorPixelOffset } = this.dragState;
-    this.ghostLayer.setPosition(
-      new Vec3(local.x - anchorPixelOffset.x, local.y - anchorPixelOffset.y, 0),
-    );
+    // 像素级偏移所有表现格节点
+    const dx = local.x - this.dragState.startMouseLocal.x;
+    const dy = local.y - this.dragState.startMouseLocal.y;
+    for (const { node, origX, origY } of this.dragState.draggedNodes) {
+      node.setPosition(origX + dx, origY + dy, 0);
+    }
 
     // 计算当前吸附目标
     const pixel = this.mouseToLocalPixel(event);
@@ -456,14 +479,9 @@ export class LevelController extends Component {
 
   // ──────────────────── drag & drop ────────────────────
 
-  /** 创建 ghost 层和 drop 预览层（在 start() 中调用一次）。 */
+  /** 创建 drop 预览层（在 start() 中调用一次）。 */
   private buildDragLayers(): void {
     const layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
-
-    this.ghostLayer = new Node('GhostLayer');
-    this.ghostLayer.layer = layer;
-    this.ghostLayer.parent = this.node;
-    this.ghostLayer.active = false;
 
     this.dropPreviewLayer = new Node('DropPreviewLayer');
     this.dropPreviewLayer.layer = layer;
@@ -499,38 +517,6 @@ export class LevelController extends Component {
       x: renderOffsetX + (lx * STRIDE + 2) * this.visualTileSize,
       y: renderOffsetY + (ly * STRIDE + 2) * this.visualTileSize,
     };
-  }
-
-  /**
-   * 在 ghostLayer 下为每个 block 格子创建半透明蓝色矩形节点。
-   * 每个节点位置相对于 anchor cell 中心。
-   */
-  private buildGhostNodes(cells: CellCoord[], anchorCell: { x: number; y: number }): void {
-    this.ghostLayer.removeAllChildren();
-    const size = STRIDE * this.visualTileSize;
-    const layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
-
-    for (const cell of cells) {
-      const node = new Node(`ghost_${cell.x}_${cell.y}`);
-      node.layer = layer;
-      node.parent = this.ghostLayer;
-      node.setPosition(
-        new Vec3(
-          (cell.x - anchorCell.x) * STRIDE * this.visualTileSize,
-          (cell.y - anchorCell.y) * STRIDE * this.visualTileSize,
-          0,
-        ),
-      );
-
-      const ut = node.addComponent(UITransform);
-      ut.setContentSize(size, size);
-
-      const sprite = node.addComponent(Sprite);
-      sprite.type = Sprite.Type.SIMPLE;
-      sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-      sprite.spriteFrame = null;
-      sprite.color = new Color(100, 150, 255, 160); // 半透明蓝
-    }
   }
 
   /**
@@ -571,11 +557,10 @@ export class LevelController extends Component {
       const ut = node.addComponent(UITransform);
       ut.setContentSize(size, size);
 
-      const sprite = node.addComponent(Sprite);
-      sprite.type = Sprite.Type.SIMPLE;
-      sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-      sprite.spriteFrame = null;
-      sprite.color = previewColor;
+      const g = node.addComponent(Graphics);
+      g.fillColor = previewColor;
+      g.rect(-size / 2, -size / 2, size, size);
+      g.fill();
     }
   }
 
@@ -628,10 +613,15 @@ export class LevelController extends Component {
   }
 
   /**
-   * 松开鼠标时结束拖拽：计算落点，成功则提交，失败则还原。
+   * 松开鼠标时结束拖拽：还原节点位置，计算落点，成功则提交，失败则还原。
    */
   private endDrag(event: EventMouse): void {
     const state = this.dragState!;
+
+    // 还原所有表现格节点到原始位置
+    for (const { node, origX, origY } of state.draggedNodes) {
+      node.setPosition(origX, origY, 0);
+    }
 
     const pixel = this.mouseToLocalPixel(event);
     const { lx, ly } = pixel
@@ -643,8 +633,6 @@ export class LevelController extends Component {
     const validDelta = this.findValidPlacement(state.originalCells, snapDx, snapDy);
 
     // 清除拖拽视觉元素
-    this.ghostLayer.active = false;
-    this.ghostLayer.removeAllChildren();
     this.dropPreviewLayer.active = false;
     this.dropPreviewLayer.removeAllChildren();
     this.dragState = null;
@@ -709,6 +697,12 @@ export class LevelController extends Component {
         this.renderer.setCellTint(vc.x, vc.y, color);
       }
     }
+  }
+
+  onDestroy(): void {
+    input.off(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+    input.off(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
+    input.off(Input.EventType.MOUSE_UP, this.onMouseUp, this);
   }
 
   /** 切换逻辑叠加层显示。可绑定到 UI 按钮。 */

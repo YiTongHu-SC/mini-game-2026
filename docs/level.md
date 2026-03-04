@@ -227,14 +227,15 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 9.  调整 node 的 UITransform 尺寸               ← 覆盖完整表现网格
 10. buildLogicOverlay()                        ← 逻辑叠加层（默认隐藏）
 11. buildWallIndicatorLayer()                  ← 墙壁指示器容器
-    buildDragLayers()                          ← ghostLayer + dropPreviewLayer（初始隐藏）
+    buildDragLayers()                          ← dropPreviewLayer（初始隐藏）
 12. applyLevelData(loadResult):
     a. logicGrid.setCell(x, y, 1)              ← 所有 occupiedCells
     b. blockManager.addWall(a, b)              ← 所有 walls
     c. addWallIndicator(a, b)                  ← 红色半透明矩形
     d. mapper.syncAll(logicGrid, visualGrid)   ← 全量同步
     （渲染延迟到 update 第 2 帧，等 Cocos 注册动态节点）
-13. 注册鼠标事件：MOUSE_DOWN / MOUSE_MOVE / MOUSE_UP
+13. 注册全局鼠标事件：input.on(MOUSE_DOWN / MOUSE_MOVE / MOUSE_UP)
+    （全部走全局 input，避免 node-level 事件吞噬问题）
 ```
 
 ### 6.1 Inspector 属性
@@ -259,9 +260,9 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 
 | 操作 | 效果 |
 |---|---|
-| **左键按下** block 所在格 | block 进入拖拽状态，跟随鼠标像素级移动 |
-| **左键移动** | ghost 跟随光标；在最近有效位置显示绿色预览，无效位置显示红色预览 |
-| **左键抬起** | 若找到有效落点则提交移动；否则 block 回原位 |
+| **左键按下** block 所在格 | block 进入拖拽状态，实际表现格节点像素级跟随鼠标 |
+| **左键移动** | block 的 tile 节点实时跟随光标；在最近有效位置显示绿色预览，无效位置显示红色预览 |
+| **左键抬起** | 还原节点原始位置，若找到有效落点则提交移动；否则 block 回原位 |
 | **右键点击** V-Edge 区域 | 切换左右两个逻辑格之间的墙壁 |
 | **右键点击** H-Edge 区域 | 切换上下两个逻辑格之间的墙壁 |
 | **右键点击** Interior/Corner | 无效果 |
@@ -281,33 +282,57 @@ interface DragState {
   blockId: string;                          // 被拖拽的 block id
   originalCells: CellCoord[];               // 拖拽开始前的格子快照
   anchorCell: { x: number; y: number };     // 被点击的逻辑格
-  anchorPixelOffset: { x: number; y: number }; // 鼠标点击位置与 anchor 中心的偏移
+  startMouseLocal: { x: number; y: number }; // 拖拽开始时的鼠标本地居中坐标
+  draggedNodes: { node: Node; origX: number; origY: number }[]; // 表现格节点及原始位置
 }
 ```
 
 `DragState` 仅在左键按下期间存在（`null` 表示无拖拽）。
 
-### 7.2 Ghost 层与预览层
+### 7.2 直接节点移动与预览层
 
-`buildDragLayers()` 在 `start()` 阶段创建两个隐藏子节点：
+拖拽采用 **直接移动真实表现格节点** 的方案，而非创建额外的 ghost 层。
+原因：Cocos 3.8 中动态创建的节点（无论 Sprite 还是 Graphics）在渲染管线中注册时机不确定，可能不可见；而已经存在的 tile 节点在 `VisualTilemapRenderer.cellNodes` 中已完成渲染注册，可保证始终可见。
+
+`buildDragLayers()` 在 `start()` 阶段仅创建一个隐藏子节点：
 
 | 节点 | 描述 |
 |---|---|
-| `GhostLayer` | 包含 block 各格的半透明蓝色矩形，随鼠标像素级平移 |
 | `DropPreviewLayer` | 在当前吸附目标位置显示绿色（有效）或红色（无效）矩形 |
 
-**Ghost 定位公式**：
+**节点收集**（`onMouseDown`）：
 
 ```
-ghost 位置 = 当前鼠标本地坐标 − anchorPixelOffset
+for cell of block.originalCells:
+  for vc of mapper.getAffectedVisualCells(cell.x, cell.y):  // 去重
+    node = renderer.getNodeAt(vc.x, vc.y)
+    记录 { node, origX: node.position.x, origY: node.position.y }
 ```
 
-每个 ghost 子节点相对 GhostLayer 原点（= anchor cell 中心）的偏移：
+**像素级跟随**（`onMouseMove`）：
 
 ```
-offset.x = (cell.x − anchorCell.x) × STRIDE × tileSize
-offset.y = (cell.y − anchorCell.y) × STRIDE × tileSize
+dx = currentMouse.x − startMouseLocal.x
+dy = currentMouse.y − startMouseLocal.y
+for each { node, origX, origY }:
+  node.setPosition(origX + dx, origY + dy, 0)
 ```
+
+**释放时还原**（`endDrag`）：所有节点先恢复到 `(origX, origY)` 原始位置，再根据落点判断是否提交移动。
+
+### 7.2.1 事件注册策略
+
+三个鼠标事件全部注册在全局 `input` 上：
+
+```ts
+input.on(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+input.on(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
+input.on(Input.EventType.MOUSE_UP,   this.onMouseUp,   this);
+```
+
+**原因**：若 `MOUSE_DOWN` 注册在 `node.on()` 上，Cocos 3.8 的 `UIInputManager` 会将该节点标记为鼠标事件目标，当鼠标位于节点区域内时会吞噬 `MOUSE_MOVE` 事件，导致全局 `input.on(MOUSE_MOVE)` 回调不触发——拖拽在节点中央区域"卡住"。统一使用全局 `input` 并在 `onMouseDown` 中手动做边界检测可避免此问题。
+
+`onDestroy()` 中清理全部三个全局监听。
 
 ### 7.3 落点搜索
 
@@ -451,7 +476,7 @@ class BlockRegistry {
 | 文件 | 修改内容 |
 |---|---|
 | `assets/scripts/tile-map/index.ts` | 新增 `LevelTypes`、`LevelLoader`、`BlockRegistry` 导出 |
-| `assets/scripts/tile-map/VisualTilemapRenderer.ts` | 新增 `setCellTint(vx, vy, color)` 公开方法，供拖拽时按表现格着色 |
+| `assets/scripts/tile-map/VisualTilemapRenderer.ts` | 新增 `setCellTint(vx, vy, color)` 着色方法 + `getNodeAt(vx, vy)` 节点访问器，供拖拽直接移动表现格节点 |
 
 ### 10.3 不修改的文件
 
@@ -492,7 +517,7 @@ class BlockRegistry {
 | 5 | block-A 与 block-B 之间有 2 条红色 wall 指示器 | 检查 (2,1)↔(3,1) 和 (2,2)↔(3,2) | ⬜ |
 | 6 | block 内部无 wall 指示器 | block-A 内部边界无红色条 | ⬜ |
 | 7 | 逻辑叠加层切换正常 | `toggleLogicOverlay()` 按钮 | ⬜ |
-| 8 | 左键拖拽 block，ghost 像素级跟随鼠标 | 场景运行 + 操作 | ⬜ |
+| 8 | 左键拖拽 block，表现格像素级跟随鼠标 | 场景运行 + 操作 | ✅ |
 | 9 | 拖拽时预览层显示绿色（有效）/ 红色（无效）矩形 | 移入空格 vs 移出边界观察 | ⬜ |
 | 10 | 松开鼠标 → block 吸附到最近有效格 | 在有效位置松开观察 | ⬜ |
 | 11 | 无有效落点 → block 回到原位 | 拖入角落无空间处松开 | ⬜ |

@@ -158,6 +158,14 @@ export class VisualTilemapRenderer {
     if (sprite) sprite.color = color;
   }
 
+  // ──────────────────── access ────────────────────
+
+  /** 返回指定表现格的节点引用，用于拖拽时直接移动节点。 */
+  getNodeAt(vx: number, vy: number): Node | null {
+    if (vx < 0 || vx >= this.cols || vy < 0 || vy >= this.rows) return null;
+    return this.cellNodes[vy]?.[vx] ?? null;
+  }
+
   // ──────────────────── private ────────────────────
 
   private updateCell(x: number, y: number, resolver: AutoTileResolver, grid: OccupancyGrid): void {
