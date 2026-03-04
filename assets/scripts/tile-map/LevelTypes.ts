@@ -24,6 +24,8 @@ export interface BlockData {
   id: string;
   /** 属于该 block 的逻辑格坐标列表 */
   cells: CellCoord[];
+  /** block 内部的墙壁（可选），用于保存同 block 内的分割线 */
+  walls?: [CellCoord, CellCoord][];
 }
 
 // ──────────────────── 关卡 ────────────────────

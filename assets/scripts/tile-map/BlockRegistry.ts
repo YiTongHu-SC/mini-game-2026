@@ -34,6 +34,17 @@ function wallKey(a: CellCoord, b: CellCoord): string {
   return `${b.x},${b.y}|${a.x},${a.y}`;
 }
 
+/** 从标准化 wall key 解析出坐标对 */
+function parseWallKey(key: string): [CellCoord, CellCoord] {
+  const [partA, partB] = key.split('|');
+  const [ax, ay] = partA.split(',').map(Number);
+  const [bx, by] = partB.split(',').map(Number);
+  return [
+    { x: ax, y: ay },
+    { x: bx, y: by },
+  ];
+}
+
 // ──────────────────── class ────────────────────
 
 export class BlockRegistry {
@@ -41,6 +52,8 @@ export class BlockRegistry {
   private cellToBlock: Map<string, string> = new Map();
   /** blockId → 可变格子列表（直接修改以支持 moveBlock） */
   private blockToCells: Map<string, CellCoord[]> = new Map();
+  /** blockId → 内部墙壁 key 集合 */
+  private blockToWalls: Map<string, Set<string>> = new Map();
 
   constructor(data: LevelData) {
     for (const block of data.blocks) {
@@ -51,6 +64,15 @@ export class BlockRegistry {
         cells.push({ x: cell.x, y: cell.y });
       }
       this.blockToCells.set(block.id, cells);
+
+      // Initialize internal walls
+      const walls = new Set<string>();
+      if (block.walls) {
+        for (const [wa, wb] of block.walls) {
+          walls.add(wallKey(wa, wb));
+        }
+      }
+      this.blockToWalls.set(block.id, walls);
     }
   }
 
@@ -76,6 +98,16 @@ export class BlockRegistry {
    */
   getAllBlockIds(): string[] {
     return [...this.blockToCells.keys()];
+  }
+
+  /**
+   * 返回 blockId 的所有内部墙壁。
+   * 若 blockId 不存在则返回空数组。
+   */
+  getBlockWalls(blockId: string): [CellCoord, CellCoord][] {
+    const walls = this.blockToWalls.get(blockId);
+    if (!walls || walls.size === 0) return [];
+    return [...walls].map(parseWallKey);
   }
 
   // ──────────────────── mutation ────────────────────
@@ -110,19 +142,66 @@ export class BlockRegistry {
     for (const cell of cells) {
       this.cellToBlock.set(`${cell.x},${cell.y}`, blockId);
     }
+
+    // 移动内部墙壁
+    const movedWalls = this.blockToWalls.get(blockId);
+    if (movedWalls && movedWalls.size > 0) {
+      const newWallSet = new Set<string>();
+      for (const wk of movedWalls) {
+        const [wa, wb] = parseWallKey(wk);
+        newWallSet.add(wallKey({ x: wa.x + dx, y: wa.y + dy }, { x: wb.x + dx, y: wb.y + dy }));
+      }
+      this.blockToWalls.set(blockId, newWallSet);
+    }
   }
 
-  // ──────────────────── wall inference ────────────────────
+  /**
+   * 在同一 block 的两个相邻格子之间添加内部墙壁。
+   * @returns true 若成功添加；false 若不在同一 block 或已存在
+   */
+  addBlockWall(a: CellCoord, b: CellCoord): boolean {
+    const blockId = this.cellToBlock.get(`${a.x},${a.y}`);
+    if (!blockId) return false;
+    if (this.cellToBlock.get(`${b.x},${b.y}`) !== blockId) return false;
+
+    const walls = this.blockToWalls.get(blockId);
+    if (!walls) return false;
+
+    const key = wallKey(a, b);
+    if (walls.has(key)) return false;
+    walls.add(key);
+    return true;
+  }
 
   /**
-   * 检查在 (a, b) 之间添加墙壁后，它们所属的 block 是否被分割为两个不连通部分。
-   * 若是，移除原 block，创建两个新 block，并返回新 block id 对；否则返回 null。
+   * 移除同一 block 内的内部墙壁。
+   * @returns true 若成功移除；false 若不存在
+   */
+  removeBlockWall(a: CellCoord, b: CellCoord): boolean {
+    const blockId = this.cellToBlock.get(`${a.x},${a.y}`);
+    if (!blockId) return false;
+    if (this.cellToBlock.get(`${b.x},${b.y}`) !== blockId) return false;
+
+    const walls = this.blockToWalls.get(blockId);
+    if (!walls) return false;
+
+    return walls.delete(wallKey(a, b));
+  }
+
+  // ──────────────────── split / wall inference ────────────────────
+
+  /**
+   * 检查 block 的连通性（考虑所有内部墙壁）。
+   * 若 block 被分割为不连通的两部分，移除原 block，创建两个新 block，
+   * 并将内部墙壁分配到对应的新 block。
    *
-   * 前提：a 和 b 必须属于同一个 block 且四方向相邻。
+   * 前提：调用前需先通过 addBlockWall(a, b) 存储墙壁。
    *
-   * 连通性判断：在 block 自身的格子集合内做 BFS（不依赖 OccupancyGrid），
-   * 将 (a, b) 之间的边视为被墙壁切断，不可通行。
+   * 连通性判断：在 block 格子集合内做 BFS，将 blockToWalls 中记录的
+   * 所有内部墙壁边视为不可通行。
    *
+   * @param a BFS 起点（决定分裂后 group A 的归属）
+   * @param b 用于验证同一 block
    * @returns `[newIdA, newIdB]` 若发生分裂；`null` 若仍连通
    */
   trySplitBlock(a: CellCoord, b: CellCoord): [string, string] | null {
@@ -133,13 +212,10 @@ export class BlockRegistry {
     const cells = this.blockToCells.get(blockId);
     if (!cells || cells.length < 2) return null;
 
-    // Build a set of block cells for O(1) membership check
     const cellSet = new Set<string>(cells.map(c => `${c.x},${c.y}`));
+    const blockWalls = this.blockToWalls.get(blockId) ?? new Set<string>();
 
-    // BFS from cell a, treating the edge a↔b as blocked
-    const wallAKey = `${a.x},${a.y}|${b.x},${b.y}`;
-    const wallBKey = `${b.x},${b.y}|${a.x},${a.y}`;
-
+    // BFS from cell a, blocking ALL internal walls of this block
     const visited = new Set<string>();
     const queue: CellCoord[] = [{ x: a.x, y: a.y }];
     visited.add(`${a.x},${a.y}`);
@@ -153,9 +229,9 @@ export class BlockRegistry {
         if (visited.has(nk)) continue;
         if (!cellSet.has(nk)) continue;
 
-        // Block the wall edge a↔b in both directions
-        const edgeKey = `${curr.x},${curr.y}|${nx},${ny}`;
-        if (edgeKey === wallAKey || edgeKey === wallBKey) continue;
+        // Block any edge that has an internal wall
+        const edgeKey = wallKey({ x: curr.x, y: curr.y }, { x: nx, y: ny });
+        if (blockWalls.has(edgeKey)) continue;
 
         visited.add(nk);
         queue.push({ x: nx, y: ny });
@@ -176,8 +252,26 @@ export class BlockRegistry {
       }
     }
 
+    // Distribute internal walls to new blocks
+    const groupASet = new Set(groupA.map(c => `${c.x},${c.y}`));
+    const groupBSet = new Set(groupB.map(c => `${c.x},${c.y}`));
+    const wallsA = new Set<string>();
+    const wallsB = new Set<string>();
+    for (const wk of blockWalls) {
+      const [wa, wb] = parseWallKey(wk);
+      const waKey = `${wa.x},${wa.y}`;
+      const wbKey = `${wb.x},${wb.y}`;
+      if (groupASet.has(waKey) && groupASet.has(wbKey)) {
+        wallsA.add(wk);
+      } else if (groupBSet.has(waKey) && groupBSet.has(wbKey)) {
+        wallsB.add(wk);
+      }
+      // else: wall spans split boundary → now cross-block, don't store
+    }
+
     // Remove old block
     this.blockToCells.delete(blockId);
+    this.blockToWalls.delete(blockId);
     for (const cell of cells) {
       this.cellToBlock.delete(`${cell.x},${cell.y}`);
     }
@@ -188,11 +282,13 @@ export class BlockRegistry {
     const idB = `${blockId}_s${this._splitCounter}b`;
 
     this.blockToCells.set(idA, groupA);
+    this.blockToWalls.set(idA, wallsA);
     for (const cell of groupA) {
       this.cellToBlock.set(`${cell.x},${cell.y}`, idA);
     }
 
     this.blockToCells.set(idB, groupB);
+    this.blockToWalls.set(idB, wallsB);
     for (const cell of groupB) {
       this.cellToBlock.set(`${cell.x},${cell.y}`, idB);
     }
@@ -201,9 +297,9 @@ export class BlockRegistry {
   }
 
   /**
-   * 根据当前所有 block 的格子位置重新推断全部跨 block 墙壁。
+   * 返回所有墙壁：跨 block 边界墙壁 + block 内部墙壁。
    *
-   * 规则与 LevelLoader.load 一致：
+   * 跨 block 边界规则与 LevelLoader.load 一致：
    *   - 对每个占用格检查四方向邻居
    *   - 若邻居属于不同 block → wall
    *   - 自动去重
@@ -214,6 +310,7 @@ export class BlockRegistry {
     const wallKeySet = new Set<string>();
     const walls: [CellCoord, CellCoord][] = [];
 
+    // 1. Cross-block walls (inferred from block boundaries)
     for (const [coordKey, blockId] of this.cellToBlock) {
       const [x, y] = coordKey.split(',').map(Number);
       const cell: CellCoord = { x, y };
@@ -230,6 +327,16 @@ export class BlockRegistry {
             wallKeySet.add(key);
             walls.push([cell, neighbor]);
           }
+        }
+      }
+    }
+
+    // 2. Internal block walls
+    for (const [, blockWallSet] of this.blockToWalls) {
+      for (const wk of blockWallSet) {
+        if (!wallKeySet.has(wk)) {
+          wallKeySet.add(wk);
+          walls.push(parseWallKey(wk));
         }
       }
     }

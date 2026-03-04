@@ -43,8 +43,9 @@ interface CellCoord {
 }
 
 interface BlockData {
-  id: string;       // block 唯一标识符（仅用于推断 wall，不参与渲染）
-  cells: CellCoord[]; // 属于该 block 的逻辑格列表
+  id: string;                        // block 唯一标识符（仅用于推断 wall，不参与渲染）
+  cells: CellCoord[];                // 属于该 block 的逻辑格列表
+  walls?: [CellCoord, CellCoord][];  // block 内部墙壁（可选），用于保存同 block 内的分割线
 }
 
 interface LevelData {
@@ -263,15 +264,17 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 | **左键按下** block 所在格 | block 进入拖拽状态，实际表现格节点像素级跟随鼠标 |
 | **左键移动** | block 的 tile 节点实时跟随光标；在最近有效位置显示绿色预览，无效位置显示红色预览 |
 | **左键抬起** | 还原节点原始位置，若找到有效落点则提交移动；否则 block 回原位 |
-| **右键点击** V-Edge 区域 | 切换左右两个逻辑格之间的墙壁；若墙壁将同一 block 分割为不连通的两部分，自动拆分为两个新 block |
-| **右键点击** H-Edge 区域 | 切换上下两个逻辑格之间的墙壁；同上，支持自动拆分 |
+| **右键点击** V-Edge 区域 | 切换左右两个逻辑格之间的墙壁；同 block 内的墙壁持久存储在 block 数据中，仅在导致不连通时才拆分 block |
+| **右键点击** H-Edge 区域 | 切换上下两个逻辑格之间的墙壁；同上 |
 | **右键点击** Interior/Corner | 无效果 |
 
 右键 wall 检测逻辑与 `DualGridController` 一致：将鼠标坐标转换为表现格坐标 `(vx, vy)`，通过余数判断区域类型。
 
 **墙壁指示器**：添加墙壁时在对应 edge 位置显示红色半透明矩形；移除墙壁时同步删除指示器节点。拖拽提交后自动重建全部指示器。
 
-**Block 分裂**：右键在同一 block 内部添加墙壁时，自动检测连通性。若该墙壁将 block 切断为不连通的两部分，移除原 block，创建两个新 block（id 格式 `{原id}_s{N}a` / `{原id}_s{N}b`），并全量重建 wall、指示器、渲染。
+**Block 内部墙壁**：右键在同一 block 内部添加墙壁时，墙壁始终存储到 block 的内部墙壁集合（`blockToWalls`），即使不导致分裂也保留。移除墙壁时从集合中删除。`getAllWalls()` 同时返回跨 block 墙壁和 block 内部墙壁。
+
+**Block 分裂**：存储墙壁后自动检测连通性（BFS 考虑该 block 的所有内部墙壁）。若不连通，移除原 block，创建两个新 block（id 格式 `{原id}_s{N}a` / `{原id}_s{N}b`），内部墙壁按归属分配到新 block，跨越分裂边界的墙壁变为跨 block 墙壁（自动推断，不再存储）。
 
 ---
 
@@ -375,34 +378,39 @@ return null   ← 无有效位置
 
 ```ts
 class BlockRegistry {
-  constructor(data: LevelData)                         // 从初始关卡数据构建
+  constructor(data: LevelData)                         // 从初始关卡数据构建（读取 block.walls）
   getBlockIdAt(x, y): string | undefined               // 查询格子所属 block
   getBlockCells(blockId): CellCoord[]                  // 查询 block 的全部格子（拷贝）
   getAllBlockIds(): string[]                            // 所有 block id
-  moveBlock(blockId, dx, dy): void                     // 更新 block 的所有格子坐标
-  trySplitBlock(a, b): [string, string] | null         // 检测并执行 block 分裂 ★新增
-  getAllWalls(): [CellCoord, CellCoord][]               // 重新推断跨 block 墙壁
+  getBlockWalls(blockId): [CellCoord, CellCoord][]     // 查询 block 的内部墙壁 ★新增
+  moveBlock(blockId, dx, dy): void                     // 更新所有格子坐标 + 内部墙壁坐标
+  addBlockWall(a, b): boolean                          // 添加 block 内部墙壁 ★新增
+  removeBlockWall(a, b): boolean                       // 移除 block 内部墙壁 ★新增
+  trySplitBlock(a, b): [string, string] | null         // 检测并执行 block 分裂（需先 addBlockWall）
+  getAllWalls(): [CellCoord, CellCoord][]               // 跨 block 墙壁 + 内部墙壁
 }
 ```
 
-`getAllWalls()` 使用与 `LevelLoader` 完全相同的四方向邻居扫描算法，确保拖拽后 wall 与初始化时一致。
+`getAllWalls()` 合并两类墙壁：① 跨 block 边界（四方向邻居扫描推断）②  block 内部墙壁（`blockToWalls` 存储）。两类互不重叠，无需去重。
 
 ### 7.6 Block 分裂（trySplitBlock）
 
-`trySplitBlock(a, b)` 在同一 block 的两个相邻格子 (a, b) 之间添加墙壁后检测连通性：
+调用方需先通过 `addBlockWall(a, b)` 存储墙壁，再调用 `trySplitBlock(a, b)` 检测连通性：
 
 ```
 1. 验证 a、b 属于同一 block，且 block 至少 2 个格子
-2. 在 block 自身的格子集合内做 BFS，从 a 出发，将 a↔b 边视为不可通行
-3. 若 BFS 覆盖全部格子 → 仍连通，返回 null
-4. 否则拆分：
-   a. 删除原 block
-   b. BFS 到达的格子 → 新 block A（id = "{原id}_s{N}a"）
-   c. 剩余格子 → 新 block B（id = "{原id}_s{N}b"）
-   d. 返回 [newIdA, newIdB]
+2. 获取该 block 的全部内部墙壁（blockToWalls）
+3. 在 block 格子集合内做 BFS，从 a 出发，将所有内部墙壁边视为不可通行
+4. 若 BFS 覆盖全部格子 → 仍连通，返回 null（墙壁保留在 block 中）
+5. 否则拆分：
+   a. 将格子分为 groupA（BFS 到达）和 groupB（其余）
+   b. 分配内部墙壁：两端点同属 A → wallsA，同属 B → wallsB，跨组 → 丢弃（变为跨 block 墙壁）
+   c. 删除原 block（含 blockToWalls 条目）
+   d. 创建新 block A（id = "{原id}_s{N}a"）和 B（id = "{原id}_s{N}b"）
+   e. 返回 [newIdA, newIdB]
 ```
 
-**注意**：连通性检测仅在 block 自身的格子集合内进行，不依赖 `OccupancyGrid`。
+**注意**：连通性检测仅在 block 自身的格子集合内进行，不依赖 `OccupancyGrid`。BFS 同时考虑所有已存储的内部墙壁，而非仅新添加的一条。
 
 ---
 
@@ -484,10 +492,10 @@ class BlockRegistry {
 |---|---|---|---|---|
 | `LevelTypes.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | `CellCoord`、`BlockData`、`LevelData` 接口 |
 | `LevelLoader.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 解析 `LevelData` → `occupiedCells` + `walls` |
-| `BlockRegistry.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 运行时 block 成员注册表，支持 `moveBlock` |
+| `BlockRegistry.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 运行时 block 成员 + 内部墙壁注册表 |
 | `LevelController.ts` | `assets/scripts/level/` | ✅ | ❌ | 场景组件，驱动双网格 + 拖拽交互 |
 | `LevelLoader.test.ts` | `tests/tile-map/` | ❌ | ✅ | 14 个测试用例 |
-| `BlockRegistry.test.ts` | `tests/tile-map/` | ❌ | ✅ | 19 个测试用例 |
+| `BlockRegistry.test.ts` | `tests/tile-map/` | ❌ | ✅ | 42 个测试用例 |
 | `level-001.json` | `assets/data/` | — | — | 示例关卡数据 |
 | `level.md` | `docs/` | — | — | 本文档 |
 
@@ -514,16 +522,17 @@ class BlockRegistry {
 | **Wall 推断** | 7 | 水平/垂直相邻跨 block → wall、不相邻/对角/同 block → 无 wall、去重、多 block 多 wall |
 | **level-001 完整场景** | 3 | 占用格收录、跨 block 边界 wall |
 
-### 11.2 BlockRegistry（29 cases）
+### 11.2 BlockRegistry（42 cases）
 
 | 测试组 | 用例数 | 覆盖内容 |
 |---|---|---|
 | **查询** | 5 | `getBlockIdAt`、`getBlockCells`（拷贝隔离）、`getAllBlockIds`、空格返回 undefined |
 | **moveBlock** | 7 | 正向平移、原地 dx=dy=0、负向平移、多 block 互不影响、平移后 `getBlockIdAt` 正确 |
 | **getAllWalls** | 7 | 无 wall、单 wall、多 wall、平移后 wall 变化、平移后原 wall 消失 |
-| **trySplitBlock** | 10 | 仍连通不分裂、切断分裂、分裂后 getBlockIdAt 更新、分裂后 getAllWalls 产生新墙壁、不同 block/空格返回 null、单格不可分裂、2×2 仍连通、I 形切中间、连续分裂 |
+| **trySplitBlock** | 10 | 仍连通不分裂（需 addBlockWall）、切断分裂、分裂后 getBlockIdAt 更新、分裂后 getAllWalls 产生新墙壁、不同 block/空格返回 null、单格不可分裂、2×2 仍连通、I 形切中间、连续分裂 |
+| **Block internal walls** | 13 | addBlockWall 同/异 block、重复、removeBlockWall、getBlockWalls、getAllWalls 含内部墙壁、不分裂时保留、moveBlock 同步移动、JSON walls 初始化、分裂后墙壁分配、多墙壁不分裂 |
 
-运行命令：`npm test`（全部 **142** 用例通过）
+运行命令：`npm test`（全部 **155** 用例通过）
 
 ---
 
@@ -531,7 +540,7 @@ class BlockRegistry {
 
 | # | 检查项 | 验证方式 | 状态 |
 |---|---|---|---|
-| 1 | 单元测试全部通过 | `npm test` — 142 用例 | ✅ |
+| 1 | 单元测试全部通过 | `npm test` — 155 用例 | ✅ |
 | 2 | level.scene 正常加载 level-001.json | 在 Cocos Creator 运行场景 | ⬜ |
 | 3 | block-A 格子正确渲染：(1,1)(2,1)(1,2)(2,2) | 场景运行 + 观察 | ⬜ |
 | 4 | block-B 格子正确渲染：(3,1)(3,2)(4,2) | 场景运行 + 观察 | ⬜ |
@@ -544,5 +553,5 @@ class BlockRegistry {
 | 11 | 无有效落点 → block 回到原位 | 拖入角落无空间处松开 | ⬜ |
 | 12 | 移动后 wall 指示器自动重建 | 拖拽后观察新旧边界 | ⬜ |
 | 13 | 右键 edge 仍可切换墙壁（拖拽时不触发） | 分别测试两种操作 | ⬜ |
-| 14 | 右键同 block 内部 edge 添加墙壁 → block 分裂为两个新 block | 场景运行 + 观察 wall 指示器变化 | ⬜ |
+| 14 | 右键同 block 内部 edge 添加墙壁 → 墙壁存储在 block 中；不连通时分裂 | 场景运行 + 观察 wall 指示器变化 | ⬜ |
 | 15 | 现有场景（dualGridTest、tiledMapTest）不受影响 | 分别运行旧场景 | ⬜ |

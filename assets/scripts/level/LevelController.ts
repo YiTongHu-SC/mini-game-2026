@@ -373,10 +373,14 @@ export class LevelController extends Component {
     // Update wall indicator
     this.updateWallIndicator(a, b, hasWall);
 
-    // ── Block split check ──
-    // 添加墙壁时，若 a、b 属于同一 block 且墙壁导致 block 断开为两部分，
-    // 拆分为两个新 block，并全量重建 wall / 指示器 / 渲染。
-    if (hasWall) {
+    // ── Block internal wall management ──
+    const blockIdA = this.blockRegistry.getBlockIdAt(a.x, a.y);
+    const blockIdB = this.blockRegistry.getBlockIdAt(b.x, b.y);
+    const isSameBlock = blockIdA !== undefined && blockIdA === blockIdB;
+
+    if (hasWall && isSameBlock) {
+      // 同 block 内添加墙壁 → 存储到 block 内部 wall + 检查连通性
+      this.blockRegistry.addBlockWall(a, b);
       const splitResult = this.blockRegistry.trySplitBlock(a, b);
       if (splitResult) {
         const [newIdA, newIdB] = splitResult;
@@ -407,12 +411,21 @@ export class LevelController extends Component {
         );
         return;
       }
+      console.log(
+        `[LevelController] Internal wall (${a.x},${a.y})↔(${b.x},${b.y}) added to block '${blockIdA}', still connected`,
+      );
+    } else if (!hasWall && isSameBlock) {
+      // 同 block 内移除墙壁 → 从 block 内部 wall 移除
+      this.blockRegistry.removeBlockWall(a, b);
+      console.log(
+        `[LevelController] Internal wall (${a.x},${a.y})↔(${b.x},${b.y}) removed from block '${blockIdA}'`,
+      );
+    } else {
+      console.log(
+        `[LevelController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
+          `refreshed ${dirty.length} visual cells`,
+      );
     }
-
-    console.log(
-      `[LevelController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
-        `refreshed ${dirty.length} visual cells`,
-    );
   }
 
   // ──────────────────── level data application ────────────────────
@@ -427,8 +440,8 @@ export class LevelController extends Component {
     }
     this.logicGrid.getDirtyAndClear(); // 清除 dirty 标记，后续全量 sync
 
-    // 写入 wall
-    for (const [a, b] of loadResult.walls) {
+    // 写入 wall（跨 block 墙壁 + block 内部墙壁）
+    for (const [a, b] of this.blockRegistry.getAllWalls()) {
       this.blockManager.addWall(a, b);
       this.addWallIndicator(a, b);
     }
