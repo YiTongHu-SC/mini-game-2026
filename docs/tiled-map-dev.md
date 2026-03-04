@@ -141,17 +141,23 @@ npx jest --config jest.config.mjs --coverage
    - `rows`: 14
    - `tileSize`: 40
    - `showDebugMask`: ✅
-   - `tileFrames`: 将占位图集切片后拖入（共 16 个 SpriteFrame）
+   - `tileFrames`: 将 16 张独立 SpriteFrame 按顺序拖入（共 16 项，见下方步骤）
 
-#### 切片占位图集
+#### 准备 16 张 SpriteFrame
 
-1. 在 Cocos Creator 资源管理器中选中 `assets/textures/tileset-placeholder.png`
-2. 在 Inspector 面板将 `Type` 改为 `Sprite Frame`
-3. 点击 **Edit** 打开 Sprite Editor
-4. 如果你想自动切片：设为 `Sliced` → `Grid` → cell size 40×40
-5. 或者在代码中直接用 `SpriteAtlas`
+> **说明**：Cocos Creator 3.x 的 Sprite Editor 只能编辑九宫格边距，**没有**多帧 Auto Slice 功能。
+> 正确做法是使用生成脚本输出的 **16 张独立 PNG**，每张对应一个 mask。
 
-> **提示**：如果不方便手动切片，也可以用 16 张独立的 40×40 PNG。运行 `node tools/generate-tileset.mjs` 后手动切分，或修改脚本生成 16 个独立文件。
+```bash
+node tools/generate-tileset.mjs
+```
+
+脚本同时输出：
+
+- `assets/textures/tileset-placeholder.png` — 完整 640×40 图条（备用）
+- `assets/textures/tileset-tiles/tile-00.png` … `tile-15.png` — **16 张独立 40×40 PNG**
+
+在 Cocos Creator Assets 面板中打开 `assets/textures/tileset-tiles/` 目录，将 `tile-00` ~ `tile-15` **按顺序**拖入 `TiledMapController` 组件的 `tileFrames` 数组（共 16 项，Index 0 = tile-00，Index 15 = tile-15）。
 
 #### 运行验证
 

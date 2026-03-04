@@ -1,4 +1,4 @@
-import { OccupancyGrid, GridCoord } from '../OccupancyGrid';
+import { OccupancyGrid, GridCoord } from '../../assets/scripts/tile-map/OccupancyGrid';
 
 /** Helper: convert GridCoord[] to a Set of "x,y" strings for easy comparison */
 function coordSet(coords: GridCoord[]): Set<string> {

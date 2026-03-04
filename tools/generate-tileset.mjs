@@ -190,14 +190,46 @@ function encodePNG(pixels, w, h) {
   ]);
 }
 
+// ── Helpers ──────────────────────────────────────
+
+/**
+ * Extract a single tile's TILE×TILE pixels from the full strip.
+ */
+function extractTile(allPixels, mask) {
+  const tilePixels = new Uint8Array(TILE * TILE * 3);
+  const ox = mask * TILE;
+  for (let y = 0; y < TILE; y++) {
+    for (let x = 0; x < TILE; x++) {
+      const srcIdx = (y * W + ox + x) * 3;
+      const dstIdx = (y * TILE + x) * 3;
+      tilePixels[dstIdx] = allPixels[srcIdx];
+      tilePixels[dstIdx + 1] = allPixels[srcIdx + 1];
+      tilePixels[dstIdx + 2] = allPixels[srcIdx + 2];
+    }
+  }
+  return tilePixels;
+}
+
 // ── Main ──────────────────────────────────────────
 
 const pixels = generateTileset();
 const png = encodePNG(pixels, W, H);
 
 const outDir = resolve(__dirname, '..', 'assets', 'textures');
+const tilesDir = resolve(outDir, 'tileset-tiles');
 mkdirSync(outDir, { recursive: true });
+mkdirSync(tilesDir, { recursive: true });
+
+// 1. Full strip (for SpriteEditor slicing)
 const outPath = resolve(outDir, 'tileset-placeholder.png');
 writeFileSync(outPath, png);
-
 console.log(`✅ Generated ${outPath}  (${W}×${H}, ${png.length} bytes)`);
+
+// 2. Individual tiles tile-00.png … tile-15.png (drag-and-drop friendly)
+for (let mask = 0; mask < 16; mask++) {
+  const tilePixels = extractTile(pixels, mask);
+  const tilePng = encodePNG(tilePixels, TILE, TILE);
+  const name = `tile-${String(mask).padStart(2, '0')}.png`;
+  writeFileSync(resolve(tilesDir, name), tilePng);
+}
+console.log(`✅ Generated ${tilesDir}/tile-00.png … tile-15.png  (${TILE}×${TILE} each)`);

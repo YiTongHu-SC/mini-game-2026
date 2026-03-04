@@ -62,7 +62,8 @@ export class TiledMapController extends Component {
 
     console.log(
       `[TiledMapController] Initialized ${this.cols}×${this.rows} grid, ` +
-        `tileSize=${this.tileSize}, tileFrames=${this.tileFrames.length}`,
+        `tileSize=${this.tileSize}, tileFrames=${this.tileFrames.length}, ` +
+        `nodeLayer=${this.node.layer}, validFrames=${this.tileFrames.filter(f => !!f).length}`,
     );
   }
 

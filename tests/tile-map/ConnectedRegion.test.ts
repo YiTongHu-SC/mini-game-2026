@@ -1,5 +1,5 @@
-import { OccupancyGrid } from '../OccupancyGrid';
-import { getConnectedRegion, getAllRegions } from '../ConnectedRegion';
+import { OccupancyGrid } from '../../assets/scripts/tile-map/OccupancyGrid';
+import { getConnectedRegion, getAllRegions } from '../../assets/scripts/tile-map/ConnectedRegion';
 
 /** Helper: convert coords to sorted "x,y" strings for stable comparison */
 function sortedKeys(coords: { x: number; y: number }[]): string[] {

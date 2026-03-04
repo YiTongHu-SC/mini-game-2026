@@ -1,6 +1,6 @@
-import { OccupancyGrid } from '../OccupancyGrid';
-import { AutoTileResolver } from '../AutoTileResolver';
-import { BIT, createDefaultConfig } from '../TileMapConfig';
+import { OccupancyGrid } from '../../assets/scripts/tile-map/OccupancyGrid';
+import { AutoTileResolver } from '../../assets/scripts/tile-map/AutoTileResolver';
+import { BIT, createDefaultConfig } from '../../assets/scripts/tile-map/TileMapConfig';
 
 describe('AutoTileResolver', () => {
   // ── mask computation ─────────────────────────────

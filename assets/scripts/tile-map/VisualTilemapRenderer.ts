@@ -8,7 +8,7 @@
  * 依赖 Cocos Creator (`cc`)。
  */
 
-import { Node, Sprite, SpriteFrame, UITransform, Color, Label, Vec3 } from 'cc';
+import { Node, Sprite, SpriteFrame, UITransform, Color, Label, Vec3, Layers } from 'cc';
 import { OccupancyGrid, GridCoord } from './OccupancyGrid';
 import { AutoTileResolver } from './AutoTileResolver';
 
@@ -56,6 +56,7 @@ export class VisualTilemapRenderer {
       const row: (Node | null)[] = [];
       for (let x = 0; x < this.cols; x++) {
         const cellNode = new Node(`cell_${x}_${y}`);
+        cellNode.layer = Layers.Enum.UI_2D; // 显式设为 UI_2D 层，确保 2D Camera 可见
         cellNode.parent = this.parentNode;
         cellNode.setPosition(new Vec3(offsetX + x * this.tileSize, offsetY + y * this.tileSize, 0));
 
@@ -63,14 +64,17 @@ export class VisualTilemapRenderer {
         const ut = cellNode.addComponent(UITransform);
         ut.setContentSize(this.tileSize, this.tileSize);
 
-        // Sprite (initially hidden)
+        // Sprite — 必须设 sizeMode=CUSTOM 且 type=SIMPLE
         const sprite = cellNode.addComponent(Sprite);
+        sprite.type = Sprite.Type.SIMPLE;
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.spriteFrame = null;
         sprite.color = new Color(255, 255, 255, 255);
 
         // Debug label (optional)
         if (this.showDebugMask) {
           const labelNode = new Node('debugLabel');
+          labelNode.layer = Layers.Enum.UI_2D;
           labelNode.parent = cellNode;
           labelNode.setPosition(Vec3.ZERO);
           const labelUT = labelNode.addComponent(UITransform);
