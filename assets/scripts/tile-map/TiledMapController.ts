@@ -7,7 +7,17 @@
  * 挂载到一个空 Node 上，在 Cocos Creator 编辑器中配置属性后运行。
  */
 
-import { _decorator, Component, Node, SpriteFrame, EventTouch, UITransform, Vec3 } from 'cc';
+import {
+  _decorator,
+  Component,
+  Node,
+  Sprite,
+  SpriteFrame,
+  EventTouch,
+  UITransform,
+  Vec3,
+  CCInteger,
+} from 'cc';
 import { OccupancyGrid, GridCoord } from './OccupancyGrid';
 import { AutoTileResolver } from './AutoTileResolver';
 import { TileMapConfig, createDefaultConfig } from './TileMapConfig';
@@ -18,16 +28,16 @@ const { ccclass, property } = _decorator;
 
 @ccclass('TiledMapController')
 export class TiledMapController extends Component {
-  @property({ type: Number, tooltip: 'Grid column count' })
+  @property({ type: CCInteger, tooltip: 'Grid column count' })
   cols: number = 10;
 
-  @property({ type: Number, tooltip: 'Grid row count' })
+  @property({ type: CCInteger, tooltip: 'Grid row count' })
   rows: number = 10;
 
-  @property({ type: Number, tooltip: 'Tile size in pixels' })
+  @property({ type: CCInteger, tooltip: 'Tile size in pixels' })
   tileSize: number = 40;
 
-  @property({ type: Boolean, tooltip: 'Show mask debug labels' })
+  @property({ tooltip: 'Show mask debug labels' })
   showDebugMask: boolean = true;
 
   @property({ type: [SpriteFrame], tooltip: 'Tileset sprite frames (16 items, index = mask)' })
@@ -38,6 +48,7 @@ export class TiledMapController extends Component {
   private resolver!: AutoTileResolver;
   private renderer!: VisualTilemapRenderer;
   private config!: TileMapConfig;
+  private _pendingRefresh = 2; // countdown frames for deferred refresh
 
   // ──────────────────── lifecycle ────────────────────
 
@@ -65,6 +76,22 @@ export class TiledMapController extends Component {
         `tileSize=${this.tileSize}, tileFrames=${this.tileFrames.length}, ` +
         `nodeLayer=${this.node.layer}, validFrames=${this.tileFrames.filter(f => !!f).length}`,
     );
+  }
+
+  update(): void {
+    if (this._pendingRefresh <= 0) return;
+    this._pendingRefresh--;
+    if (this._pendingRefresh === 0) {
+      // Deferred refresh — ensures render pipeline has had time to register dynamic nodes
+      this.renderer.refreshAll(this.resolver, this.grid);
+      const firstChild = this.node.children[0];
+      const sprite = firstChild?.getComponent(Sprite) ?? null;
+      console.log(
+        `[TiledMapController] Deferred refresh done. children=${this.node.children.length}, ` +
+          `firstChild.layer=${firstChild?.layer}, firstChild.active=${firstChild?.active}, ` +
+          `sprite=${!!sprite}, spriteFrame=${!!sprite?.spriteFrame}`,
+      );
+    }
   }
 
   // ──────────────────── input ────────────────────

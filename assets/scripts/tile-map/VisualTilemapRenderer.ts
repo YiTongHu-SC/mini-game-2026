@@ -12,6 +12,9 @@ import { Node, Sprite, SpriteFrame, UITransform, Color, Label, Vec3, Layers } fr
 import { OccupancyGrid, GridCoord } from './OccupancyGrid';
 import { AutoTileResolver } from './AutoTileResolver';
 
+/** Fallback layer value for UI_2D (1 << 25). */
+const UI_2D_LAYER = 1 << 25;
+
 export class VisualTilemapRenderer {
   private parentNode: Node;
   private cols: number;
@@ -44,9 +47,20 @@ export class VisualTilemapRenderer {
   // ──────────────────── build ────────────────────
 
   private buildNodeGrid(): void {
-    // Clear existing children
-    this.parentNode.removeAllChildren();
+    // Only clear if there are existing children (avoid unnecessary call in editor)
+    if (this.parentNode.children.length > 0) {
+      this.parentNode.removeAllChildren();
+    }
     this.cellNodes = [];
+
+    // Derive layer from parent node (scene-serialized value) — more reliable than
+    // Layers.Enum.UI_2D which may not resolve correctly in editor preview.
+    const layer = this.parentNode.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+
+    console.log(
+      `[VisualTilemapRenderer] buildNodeGrid ${this.cols}×${this.rows}, ` +
+        `parentLayer=${this.parentNode.layer}, Layers.Enum.UI_2D=${Layers?.Enum?.UI_2D}, using layer=${layer}`,
+    );
 
     // Offset so grid is centered on parentNode
     const offsetX = -(this.cols * this.tileSize) / 2 + this.tileSize / 2;
@@ -56,7 +70,7 @@ export class VisualTilemapRenderer {
       const row: (Node | null)[] = [];
       for (let x = 0; x < this.cols; x++) {
         const cellNode = new Node(`cell_${x}_${y}`);
-        cellNode.layer = Layers.Enum.UI_2D; // 显式设为 UI_2D 层，确保 2D Camera 可见
+        cellNode.layer = layer;
         cellNode.parent = this.parentNode;
         cellNode.setPosition(new Vec3(offsetX + x * this.tileSize, offsetY + y * this.tileSize, 0));
 
@@ -74,7 +88,7 @@ export class VisualTilemapRenderer {
         // Debug label (optional)
         if (this.showDebugMask) {
           const labelNode = new Node('debugLabel');
-          labelNode.layer = Layers.Enum.UI_2D;
+          labelNode.layer = layer;
           labelNode.parent = cellNode;
           labelNode.setPosition(Vec3.ZERO);
           const labelUT = labelNode.addComponent(UITransform);
