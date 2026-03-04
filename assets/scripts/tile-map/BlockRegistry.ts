@@ -80,6 +80,9 @@ export class BlockRegistry {
 
   // ──────────────────── mutation ────────────────────
 
+  /** 内部计数器，用于生成分裂后的新 block id */
+  private _splitCounter = 0;
+
   /**
    * 将 blockId 的所有格子平移 (dx, dy)。
    * 更新内部的双向映射，不操作任何外部网格。
@@ -110,6 +113,92 @@ export class BlockRegistry {
   }
 
   // ──────────────────── wall inference ────────────────────
+
+  /**
+   * 检查在 (a, b) 之间添加墙壁后，它们所属的 block 是否被分割为两个不连通部分。
+   * 若是，移除原 block，创建两个新 block，并返回新 block id 对；否则返回 null。
+   *
+   * 前提：a 和 b 必须属于同一个 block 且四方向相邻。
+   *
+   * 连通性判断：在 block 自身的格子集合内做 BFS（不依赖 OccupancyGrid），
+   * 将 (a, b) 之间的边视为被墙壁切断，不可通行。
+   *
+   * @returns `[newIdA, newIdB]` 若发生分裂；`null` 若仍连通
+   */
+  trySplitBlock(a: CellCoord, b: CellCoord): [string, string] | null {
+    const blockId = this.cellToBlock.get(`${a.x},${a.y}`);
+    if (!blockId) return null;
+    if (this.cellToBlock.get(`${b.x},${b.y}`) !== blockId) return null;
+
+    const cells = this.blockToCells.get(blockId);
+    if (!cells || cells.length < 2) return null;
+
+    // Build a set of block cells for O(1) membership check
+    const cellSet = new Set<string>(cells.map(c => `${c.x},${c.y}`));
+
+    // BFS from cell a, treating the edge a↔b as blocked
+    const wallAKey = `${a.x},${a.y}|${b.x},${b.y}`;
+    const wallBKey = `${b.x},${b.y}|${a.x},${a.y}`;
+
+    const visited = new Set<string>();
+    const queue: CellCoord[] = [{ x: a.x, y: a.y }];
+    visited.add(`${a.x},${a.y}`);
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      for (const dir of DIRS) {
+        const nx = curr.x + dir.x;
+        const ny = curr.y + dir.y;
+        const nk = `${nx},${ny}`;
+        if (visited.has(nk)) continue;
+        if (!cellSet.has(nk)) continue;
+
+        // Block the wall edge a↔b in both directions
+        const edgeKey = `${curr.x},${curr.y}|${nx},${ny}`;
+        if (edgeKey === wallAKey || edgeKey === wallBKey) continue;
+
+        visited.add(nk);
+        queue.push({ x: nx, y: ny });
+      }
+    }
+
+    // If BFS from a reached all cells, block is still connected
+    if (visited.size === cells.length) return null;
+
+    // Split: partition cells into two groups
+    const groupA: CellCoord[] = [];
+    const groupB: CellCoord[] = [];
+    for (const cell of cells) {
+      if (visited.has(`${cell.x},${cell.y}`)) {
+        groupA.push(cell);
+      } else {
+        groupB.push(cell);
+      }
+    }
+
+    // Remove old block
+    this.blockToCells.delete(blockId);
+    for (const cell of cells) {
+      this.cellToBlock.delete(`${cell.x},${cell.y}`);
+    }
+
+    // Create two new blocks
+    this._splitCounter++;
+    const idA = `${blockId}_s${this._splitCounter}a`;
+    const idB = `${blockId}_s${this._splitCounter}b`;
+
+    this.blockToCells.set(idA, groupA);
+    for (const cell of groupA) {
+      this.cellToBlock.set(`${cell.x},${cell.y}`, idA);
+    }
+
+    this.blockToCells.set(idB, groupB);
+    for (const cell of groupB) {
+      this.cellToBlock.set(`${cell.x},${cell.y}`, idB);
+    }
+
+    return [idA, idB];
+  }
 
   /**
    * 根据当前所有 block 的格子位置重新推断全部跨 block 墙壁。

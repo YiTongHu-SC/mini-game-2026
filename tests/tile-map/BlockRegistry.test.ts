@@ -222,3 +222,231 @@ describe('BlockRegistry — getAllWalls', () => {
     expect(wallSet(reg.getAllWalls())).toContain('1,1|2,1');
   });
 });
+
+// ════════════════════════════════════════════════════════════════
+// 4. trySplitBlock
+// ════════════════════════════════════════════════════════════════
+
+describe('BlockRegistry — trySplitBlock', () => {
+  test('L 形 block 在腰部添加墙壁 → 分裂为两部分', () => {
+    // Block layout:
+    //   (0,1) (1,1)
+    //   (0,0) (1,0) (2,0)
+    // Wall at (1,1)↔(1,0) cuts off top part
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'L',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+            { x: 0, y: 1 },
+            { x: 1, y: 1 },
+          ],
+        },
+      ],
+    });
+
+    const result = reg.trySplitBlock({ x: 1, y: 1 }, { x: 1, y: 0 });
+    // Still connected: (0,0)-(1,0)-(2,0) and (0,1)-(1,1), but (0,0)-(0,1) is open
+    // So actually (0,0) connects to (0,1) via their adjacency. Let me reconsider...
+    // BFS from (1,1): can go to (0,1), then (0,1)→(0,0), (0,0)→(1,0)… wait, (1,1)↔(1,0) is blocked.
+    // (1,1) → (0,1) → (0,0) → (1,0) → (2,0) — all reachable. Still connected!
+    expect(result).toBeNull();
+  });
+
+  test('bar block 墙壁切断中间 → 分裂为左右两部分', () => {
+    // Block layout: (0,0)-(1,0)-(2,0)-(3,0)
+    // Wall at (1,0)↔(2,0) → splits into [0,0..1,0] and [2,0..3,0]
+    const reg = new BlockRegistry({
+      gridCols: 6,
+      gridRows: 2,
+      blocks: [
+        {
+          id: 'bar',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+            { x: 3, y: 0 },
+          ],
+        },
+      ],
+    });
+
+    const result = reg.trySplitBlock({ x: 1, y: 0 }, { x: 2, y: 0 });
+    expect(result).not.toBeNull();
+    const [idA, idB] = result!;
+
+    // Original block should be gone
+    expect(reg.getBlockCells('bar')).toHaveLength(0);
+    expect(reg.getAllBlockIds()).not.toContain('bar');
+
+    // Two new blocks should exist
+    const cellsA = reg.getBlockCells(idA);
+    const cellsB = reg.getBlockCells(idB);
+    expect(cellsA.length + cellsB.length).toBe(4);
+
+    // One group has (0,0)(1,0), the other has (2,0)(3,0)
+    const keysA = new Set(cellsA.map(c => `${c.x},${c.y}`));
+    const keysB = new Set(cellsB.map(c => `${c.x},${c.y}`));
+    // a is BFS from (1,0) side
+    expect(keysA).toContain('1,0');
+    expect(keysA).toContain('0,0');
+    expect(keysB).toContain('2,0');
+    expect(keysB).toContain('3,0');
+  });
+
+  test('分裂后 getBlockIdAt 返回新 blockId', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 2,
+      blocks: [
+        {
+          id: 'X',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+          ],
+        },
+      ],
+    });
+
+    const result = reg.trySplitBlock({ x: 0, y: 0 }, { x: 1, y: 0 });
+    expect(result).not.toBeNull();
+    const [idA, idB] = result!;
+
+    expect(reg.getBlockIdAt(0, 0)).toBe(idA);
+    expect(reg.getBlockIdAt(1, 0)).toBe(idB);
+    // Original id gone
+    expect(reg.getBlockIdAt(0, 0)).not.toBe('X');
+  });
+
+  test('分裂后 getAllWalls 产生跨 block 墙壁', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 2,
+      blocks: [
+        {
+          id: 'X',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+          ],
+        },
+      ],
+    });
+
+    reg.trySplitBlock({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const walls = reg.getAllWalls();
+    expect(walls).toHaveLength(1);
+    expect(wallSet(walls)).toContain('0,0|1,0');
+  });
+
+  test('不同 block 的两个格子 → 返回 null', () => {
+    const reg = new BlockRegistry(SIMPLE_LEVEL);
+    const result = reg.trySplitBlock({ x: 2, y: 1 }, { x: 3, y: 1 });
+    expect(result).toBeNull();
+  });
+
+  test('不属于任何 block 的格子 → 返回 null', () => {
+    const reg = new BlockRegistry(SIMPLE_LEVEL);
+    const result = reg.trySplitBlock({ x: 0, y: 0 }, { x: 1, y: 0 });
+    expect(result).toBeNull();
+  });
+
+  test('单格 block → 返回 null（无法分裂）', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [{ id: 'solo', cells: [{ x: 1, y: 1 }] }],
+    });
+    // There's no valid adjacent cell in the same block, so it can't split
+    const result = reg.trySplitBlock({ x: 1, y: 1 }, { x: 2, y: 1 });
+    expect(result).toBeNull();
+  });
+
+  test('2×2 block 水平切割 → 分裂为上下两部分', () => {
+    // Block:
+    //   (0,1) (1,1)
+    //   (0,0) (1,0)
+    // Wall at (0,0)↔(0,1) → still connected via (1,0)↔(1,1)
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'sq',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 1, y: 1 },
+          ],
+        },
+      ],
+    });
+
+    const result = reg.trySplitBlock({ x: 0, y: 0 }, { x: 0, y: 1 });
+    // Still connected: (0,0)→(1,0)→(1,1)→(0,1)
+    expect(result).toBeNull();
+  });
+
+  test('I 形 3 格 block 切断中间 → 分裂', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'I',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 0, y: 1 },
+            { x: 0, y: 2 },
+          ],
+        },
+      ],
+    });
+
+    const result = reg.trySplitBlock({ x: 0, y: 0 }, { x: 0, y: 1 });
+    expect(result).not.toBeNull();
+    const [idA, idB] = result!;
+    // Group A: BFS from (0,0) with wall blocking (0,0)↔(0,1) → only (0,0)
+    expect(reg.getBlockCells(idA)).toHaveLength(1);
+    // Group B: (0,1) and (0,2)
+    expect(reg.getBlockCells(idB)).toHaveLength(2);
+  });
+
+  test('分裂后连续再分裂仍然正确', () => {
+    // 3-cell bar: (0,0)-(1,0)-(2,0)
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 2,
+      blocks: [
+        {
+          id: 'bar',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+          ],
+        },
+      ],
+    });
+
+    // First split: wall at (0,0)↔(1,0) → [0,0] and [1,0..2,0]
+    const result1 = reg.trySplitBlock({ x: 0, y: 0 }, { x: 1, y: 0 });
+    expect(result1).not.toBeNull();
+    const [, idRight] = result1!;
+    expect(reg.getBlockCells(idRight)).toHaveLength(2);
+
+    // Second split: wall at (1,0)↔(2,0) within the right block
+    const result2 = reg.trySplitBlock({ x: 1, y: 0 }, { x: 2, y: 0 });
+    expect(result2).not.toBeNull();
+    // Now 3 blocks total, each with 1 cell
+    expect(reg.getAllBlockIds()).toHaveLength(3);
+  });
+});

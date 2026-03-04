@@ -373,6 +373,42 @@ export class LevelController extends Component {
     // Update wall indicator
     this.updateWallIndicator(a, b, hasWall);
 
+    // ── Block split check ──
+    // 添加墙壁时，若 a、b 属于同一 block 且墙壁导致 block 断开为两部分，
+    // 拆分为两个新 block，并全量重建 wall / 指示器 / 渲染。
+    if (hasWall) {
+      const splitResult = this.blockRegistry.trySplitBlock(a, b);
+      if (splitResult) {
+        const [newIdA, newIdB] = splitResult;
+
+        // 重建全部 wall（split 改变了 block 成员关系）
+        this.blockManager.clearWalls();
+        for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
+          this.blockManager.addWall(wa, wb);
+        }
+
+        // 全量同步 + 刷新渲染
+        this.logicGrid.getDirtyAndClear();
+        this.mapper.syncAll(this.logicGrid, this.visualGrid);
+        this.renderer.refreshAll(this.resolver, this.visualGrid);
+
+        // 重建 wall 指示器
+        this.clearAllWallIndicators();
+        for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
+          this.addWallIndicator(wa, wb);
+        }
+
+        if (this.showLogicOverlay) this.refreshAllOverlay();
+
+        console.log(
+          `[LevelController] Block split: (${a.x},${a.y})↔(${b.x},${b.y}) → ` +
+            `'${newIdA}' (${this.blockRegistry.getBlockCells(newIdA).length} cells) + ` +
+            `'${newIdB}' (${this.blockRegistry.getBlockCells(newIdB).length} cells)`,
+        );
+        return;
+      }
+    }
+
     console.log(
       `[LevelController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
         `refreshed ${dirty.length} visual cells`,
