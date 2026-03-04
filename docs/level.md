@@ -58,15 +58,16 @@ interface LevelData {
 
 ```json
 {
-  "gridCols": 6,
-  "gridRows": 6,
+  "gridCols": 8,
+  "gridRows": 10,
   "blocks": [
     {
       "id": "block-A",
       "cells": [
         { "x": 1, "y": 1 },
         { "x": 2, "y": 1 },
-        { "x": 1, "y": 2 }
+        { "x": 1, "y": 2 },
+        { "x": 2, "y": 2 }
       ]
     },
     {
@@ -81,19 +82,19 @@ interface LevelData {
 }
 ```
 
-逻辑网格示意（6×6，`.` = 空，`A`/`B` = block id）：
+逻辑网格示意（8×10，`.` = 空，`A`/`B` = block id）：
 
 ```
-row 5  . . . . . .
-row 4  . . . . . .
-row 3  . . . . . .
-row 2  . A . B B .
-row 1  . A A B . .
-row 0  . . . . . .
-       0 1 2 3 4 5  (col)
+row 9  . . . . . . . .
+row 8  . . . . . . . .
+...
+row 2  . A A B B . . .
+row 1  . A A B . . . .
+row 0  . . . . . . . .
+       0 1 2 3 4 5 6 7  (col)
 ```
 
-block-A `(2,1)` 与 block-B `(3,1)` 水平相邻 → 自动在两者之间插入一条墙壁。
+block-A `(2,1)↔(3,1)` 以及 `(2,2)↔(3,2)` 各有一个水平相邻 → 自动插入 **2 条**墙壁。
 
 ### 2.3 约束
 
@@ -135,14 +136,15 @@ for 每个已占用格 (x, y)，属于 blockId:
 对 level-001 的两个 block：
 
 ```
-block-A 格子：(1,1), (2,1), (1,2)
+block-A 格子：(1,1), (2,1), (1,2), (2,2)
 block-B 格子：(3,1), (3,2), (4,2)
 
 扫描 (2,1) 右邻 (3,1) → 属于 block-B → wall: (2,1)↔(3,1)
+扫描 (2,2) 右邻 (3,2) → 属于 block-B → wall: (2,2)↔(3,2)
 
 其他相邻格对均属于同一 block 或不相邻 → 无额外 wall
 
-结果：walls = [ [(2,1), (3,1)] ]   // 仅 1 条
+结果：walls = [ [(2,1),(3,1)], [(2,2),(3,2)] ]   // 共 2 条
 ```
 
 ---
@@ -150,23 +152,23 @@ block-B 格子：(3,1), (3,2), (4,2)
 ## 4. 模块架构
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    LevelController (cc)                          │
-│       场景组件 — 解析关卡 JSON → 初始化双网格系统                   │
-├──────────────┬───────────────┬─────────────────┬─────────────────┤
-│ OccupancyGrid│ DualGridMapper│ OccupancyGrid   │ VisualTilemap-  │
-│ (逻辑网格)    │ (坐标映射)     │ (表现网格)       │ Renderer (渲染) │
-│ L_cols×L_rows│ 分类/同步/规则  │ V_cols×V_rows   │ Sprite 节点网格  │
-├──────────────┤               ├─────────────────┤                 │
-│ BlockManager │               │ AutoTileResolver │                 │
-│ (wall 存储)   │               │ mask→tileIndex   │                 │
-└──────────────┴───────────────┴─────────────────┴─────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                       LevelController (cc)                             │
+│      场景组件 — 解析关卡 JSON → 初始化双网格 + 拖拽交互                   │
+├──────────────┬──────────────┬─────────────────┬────────────────────────┤
+│ OccupancyGrid│ DualGridMapper│ OccupancyGrid   │ VisualTilemapRenderer  │
+│ (逻辑网格)    │ (坐标映射)     │ (表现网格)       │ Sprite 节点网格         │
+│ L_cols×L_rows│ 分类/同步/规则  │ V_cols×V_rows   │ setCellTint() ★新增    │
+├──────────────┤               ├─────────────────┤                        │
+│ BlockManager │               │ AutoTileResolver │                        │
+│ (wall 存储)   │               │ mask→tileIndex   │                        │
+└──────────────┴───────────────┴─────────────────┴────────────────────────┘
          ↑
-┌────────┴────────┐
-│   LevelLoader   │  解析 LevelData → occupiedCells + walls
-│   LevelTypes    │  CellCoord / BlockData / LevelData 接口
-└─────────────────┘
-         ↑
+┌────────┴────────┐    ┌──────────────────────────────┐
+│   LevelLoader   │    │       BlockRegistry ★新增      │
+│   LevelTypes    │    │  运行时 block 成员注册表          │
+└─────────────────┘    │  moveBlock() / getAllWalls()   │
+         ↑             └──────────────────────────────┘
 ┌─────────────────┐
 │  level-001.json │  关卡 JSON 数据文件
 └─────────────────┘
@@ -175,6 +177,7 @@ block-B 格子：(3,1), (3,2), (4,2)
 **关系说明**：
 
 - `LevelLoader` / `LevelTypes`：零 Cocos 依赖，可在 Jest 中直接测试
+- `BlockRegistry`：零 Cocos 依赖；在 `start()` 中与 `LevelLoader` 一同初始化，维护拖拽期间的 block→cell 映射
 - `LevelController`：Cocos `@ccclass` 组件，复用全部现有双网格系统类，不继承 `DualGridController`
 - 关卡 JSON 通过 Cocos `JsonAsset` 属性引用，在 Inspector 中绑定
 
@@ -212,23 +215,26 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 `LevelController.start()` 执行以下步骤：
 
 ```
-1. 读取 Inspector 绑定的 levelData (JsonAsset)，验证非空
-2. LevelLoader.load(data)                      ← 解析关卡数据
-3. new OccupancyGrid(gridCols, gridRows)        ← 逻辑网格
-4. new OccupancyGrid(vCols, vRows)             ← 表现网格（visualGridSize 计算）
-5. new DualGridMapper(gridCols, gridRows)       ← 坐标映射器
-6. new BlockManager()  +  mapper.setBlockManager ← 墙壁管理器注入
-7. new AutoTileResolver(visualGrid, config)    ← 使用默认 maskTable
-8. new VisualTilemapRenderer(node, ...)        ← 创建 Sprite 节点网格
-9. 调整 node 的 UITransform 尺寸               ← 覆盖完整表现网格
+1.  读取 Inspector 绑定的 levelData (JsonAsset)，验证非空
+2.  LevelLoader.load(data)                      ← 解析关卡数据
+    new BlockRegistry(data)                     ← 初始化运行时 block 注册表
+3.  new OccupancyGrid(gridCols, gridRows)        ← 逻辑网格
+4.  new OccupancyGrid(vCols, vRows)             ← 表现网格（visualGridSize 计算）
+5.  new DualGridMapper(gridCols, gridRows)       ← 坐标映射器
+6.  new BlockManager()  +  mapper.setBlockManager ← 墙壁管理器注入
+7.  new AutoTileResolver(visualGrid, config)    ← 使用默认 maskTable
+8.  new VisualTilemapRenderer(node, ...)        ← 创建 Sprite 节点网格
+9.  调整 node 的 UITransform 尺寸               ← 覆盖完整表现网格
 10. buildLogicOverlay()                        ← 逻辑叠加层（默认隐藏）
 11. buildWallIndicatorLayer()                  ← 墙壁指示器容器
+    buildDragLayers()                          ← ghostLayer + dropPreviewLayer（初始隐藏）
 12. applyLevelData(loadResult):
     a. logicGrid.setCell(x, y, 1)              ← 所有 occupiedCells
     b. blockManager.addWall(a, b)              ← 所有 walls
     c. addWallIndicator(a, b)                  ← 红色半透明矩形
     d. mapper.syncAll(logicGrid, visualGrid)   ← 全量同步
     （渲染延迟到 update 第 2 帧，等 Cocos 注册动态节点）
+13. 注册鼠标事件：MOUSE_DOWN / MOUSE_MOVE / MOUSE_UP
 ```
 
 ### 6.1 Inspector 属性
@@ -253,17 +259,109 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 
 | 操作 | 效果 |
 |---|---|
-| 右键点击 V-Edge 区域 | 切换左右两个逻辑格之间的墙壁 |
-| 右键点击 H-Edge 区域 | 切换上下两个逻辑格之间的墙壁 |
-| 右键点击 Interior/Corner | 无效果 |
+| **左键按下** block 所在格 | block 进入拖拽状态，跟随鼠标像素级移动 |
+| **左键移动** | ghost 跟随光标；在最近有效位置显示绿色预览，无效位置显示红色预览 |
+| **左键抬起** | 若找到有效落点则提交移动；否则 block 回原位 |
+| **右键点击** V-Edge 区域 | 切换左右两个逻辑格之间的墙壁 |
+| **右键点击** H-Edge 区域 | 切换上下两个逻辑格之间的墙壁 |
+| **右键点击** Interior/Corner | 无效果 |
 
-检测逻辑与 `DualGridController` 一致：将鼠标坐标转换为表现格坐标 `(vx, vy)`，通过余数判断区域类型（见双网格文档第 11 节）。
+右键 wall 检测逻辑与 `DualGridController` 一致：将鼠标坐标转换为表现格坐标 `(vx, vy)`，通过余数判断区域类型。
 
-**墙壁指示器**：添加墙壁时在对应 edge 位置显示红色半透明矩形；移除墙壁时同步删除指示器节点。
+**墙壁指示器**：添加墙壁时在对应 edge 位置显示红色半透明矩形；移除墙壁时同步删除指示器节点。拖拽提交后自动重建全部指示器。
 
 ---
 
-## 7. 场景创建说明（Cocos Creator 编辑器操作）
+## 7. 拖拽功能（Drag & Drop）
+
+### 7.1 数据结构
+
+```ts
+interface DragState {
+  blockId: string;                          // 被拖拽的 block id
+  originalCells: CellCoord[];               // 拖拽开始前的格子快照
+  anchorCell: { x: number; y: number };     // 被点击的逻辑格
+  anchorPixelOffset: { x: number; y: number }; // 鼠标点击位置与 anchor 中心的偏移
+}
+```
+
+`DragState` 仅在左键按下期间存在（`null` 表示无拖拽）。
+
+### 7.2 Ghost 层与预览层
+
+`buildDragLayers()` 在 `start()` 阶段创建两个隐藏子节点：
+
+| 节点 | 描述 |
+|---|---|
+| `GhostLayer` | 包含 block 各格的半透明蓝色矩形，随鼠标像素级平移 |
+| `DropPreviewLayer` | 在当前吸附目标位置显示绿色（有效）或红色（无效）矩形 |
+
+**Ghost 定位公式**：
+
+```
+ghost 位置 = 当前鼠标本地坐标 − anchorPixelOffset
+```
+
+每个 ghost 子节点相对 GhostLayer 原点（= anchor cell 中心）的偏移：
+
+```
+offset.x = (cell.x − anchorCell.x) × STRIDE × tileSize
+offset.y = (cell.y − anchorCell.y) × STRIDE × tileSize
+```
+
+### 7.3 落点搜索
+
+`findValidPlacement(cells, snapDx, snapDy)` 以当前吸附格偏移为中心，在 **±2 曼哈顿半径**内搜索最近有效位置：
+
+```
+for ddx in [−2..+2], ddy in [−2..+2]，按曼哈顿距离升序排列:
+  dx = snapDx + ddx,  dy = snapDy + ddy
+  if isPlacementValid(cells, dx, dy):
+    return { dx, dy }
+return null   ← 无有效位置
+```
+
+**有效性判断** (`isPlacementValid`)：
+
+- 所有目标格在网格范围内
+- 目标格为空 **或** 属于被拖拽的 block 本身（dx=0/dy=0 原位情形）
+
+### 7.4 提交流程
+
+`commitDrop(state, dx, dy)` 执行以下步骤：
+
+```
+1. 从逻辑网格移除原格子（setCell → 0）
+2. blockRegistry.moveBlock(blockId, dx, dy)   ← 更新注册表
+3. 写入新格子到逻辑网格（setCell → 1）
+4. blockManager.clearWalls()
+   + blockRegistry.getAllWalls() → blockManager.addWall()  ← 重建 wall
+5. mapper.syncAll + renderer.refreshAll       ← 全量重新渲染
+6. clearAllWallIndicators() + addWallIndicator ← 重建指示器
+```
+
+若找不到有效落点，仅调用 `renderer.refreshAll()` 还原 tint，不修改任何状态。
+
+### 7.5 BlockRegistry
+
+`BlockRegistry` 是零 Cocos 依赖的纯 TS 类，维护运行时的 block 成员关系：
+
+```ts
+class BlockRegistry {
+  constructor(data: LevelData)                         // 从初始关卡数据构建
+  getBlockIdAt(x, y): string | undefined               // 查询格子所属 block
+  getBlockCells(blockId): CellCoord[]                  // 查询 block 的全部格子（拷贝）
+  getAllBlockIds(): string[]                            // 所有 block id
+  moveBlock(blockId, dx, dy): void                     // 更新 block 的所有格子坐标
+  getAllWalls(): [CellCoord, CellCoord][]               // 重新推断跨 block 墙壁
+}
+```
+
+`getAllWalls()` 使用与 `LevelLoader` 完全相同的四方向邻居扫描算法，确保拖拽后 wall 与初始化时一致。
+
+---
+
+## 8. 场景创建说明（Cocos Creator 编辑器操作）
 
 ### 7.1 创建 level.scene
 
@@ -296,7 +394,7 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 
 ---
 
-## 8. 新增关卡方法
+## 9. 新增关卡方法
 
 ### 8.1 创建新 JSON 文件
 
@@ -333,52 +431,71 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 
 ---
 
-## 9. 文件清单
+## 10. 文件清单
 
-### 9.1 新增文件
+### 10.1 新增文件
 
 | 文件 | 路径 | Cocos 依赖 | Jest 可测 | 职责 |
 |---|---|---|---|---|
 | `LevelTypes.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | `CellCoord`、`BlockData`、`LevelData` 接口 |
 | `LevelLoader.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 解析 `LevelData` → `occupiedCells` + `walls` |
-| `LevelController.ts` | `assets/scripts/level/` | ✅ | ❌ | 场景组件，驱动双网格系统 |
+| `BlockRegistry.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 运行时 block 成员注册表，支持 `moveBlock` |
+| `LevelController.ts` | `assets/scripts/level/` | ✅ | ❌ | 场景组件，驱动双网格 + 拖拽交互 |
 | `LevelLoader.test.ts` | `tests/tile-map/` | ❌ | ✅ | 14 个测试用例 |
+| `BlockRegistry.test.ts` | `tests/tile-map/` | ❌ | ✅ | 19 个测试用例 |
 | `level-001.json` | `assets/data/` | — | — | 示例关卡数据 |
 | `level.md` | `docs/` | — | — | 本文档 |
 
-### 9.2 修改文件
+### 10.2 修改文件
 
 | 文件 | 修改内容 |
 |---|---|
-| `assets/scripts/tile-map/index.ts` | 新增 `LevelTypes`（`CellCoord`、`BlockData`、`LevelData`）和 `LevelLoader`（`LevelLoadResult`）导出 |
+| `assets/scripts/tile-map/index.ts` | 新增 `LevelTypes`、`LevelLoader`、`BlockRegistry` 导出 |
+| `assets/scripts/tile-map/VisualTilemapRenderer.ts` | 新增 `setCellTint(vx, vy, color)` 公开方法，供拖拽时按表现格着色 |
 
-### 9.3 不修改的文件
+### 10.3 不修改的文件
 
-所有现有模块（`OccupancyGrid`、`DualGridMapper`、`BlockManager`、`DualGridController`、`VisualTilemapRenderer`、`AutoTileResolver`、`TileMapConfig`、`ConnectedRegion`）均不修改。
+所有其他现有模块（`OccupancyGrid`、`DualGridMapper`、`BlockManager`、`DualGridController`、`AutoTileResolver`、`TileMapConfig`、`ConnectedRegion`）均不修改。
 
 ---
 
-## 10. 测试用例一览（14 cases）
+## 11. 测试用例一览
+
+### 11.1 LevelLoader（14 cases）
 
 | 测试组 | 用例数 | 覆盖内容 |
 |---|---|---|
 | **基础解析** | 4 | 空关卡无格、单格无 wall、单 block 内部无 wall、gridCols/gridRows 保留 |
-| **Wall 推断** | 7 | 水平/垂直相邻跨 block → 1 条 wall、不相邻 → 无 wall、对角 → 无 wall、同 block 相邻 → 无 wall、重复 wall 去重、多 block 多条 wall |
-| **level-001 完整场景** | 3 | 共 6 个占用格、所有格子收录、仅 1 条交界 wall `(2,1)↔(3,1)` |
+| **Wall 推断** | 7 | 水平/垂直相邻跨 block → wall、不相邻/对角/同 block → 无 wall、去重、多 block 多 wall |
+| **level-001 完整场景** | 3 | 占用格收录、跨 block 边界 wall |
 
-运行命令：`npm test`（全部 113 用例通过，含本次新增 14 条）
+### 11.2 BlockRegistry（19 cases）
+
+| 测试组 | 用例数 | 覆盖内容 |
+|---|---|---|
+| **查询** | 5 | `getBlockIdAt`、`getBlockCells`（拷贝隔离）、`getAllBlockIds`、空格返回 undefined |
+| **moveBlock** | 7 | 正向平移、原地 dx=dy=0、负向平移、多 block 互不影响、平移后 `getBlockIdAt` 正确 |
+| **getAllWalls** | 7 | 无 wall、单 wall、多 wall、平移后 wall 变化、平移后原 wall 消失 |
+
+运行命令：`npm test`（全部 **132** 用例通过，含本次新增 33 条）
 
 ---
 
-## 11. 验收检查清单
+## 12. 验收检查清单
 
 | # | 检查项 | 验证方式 | 状态 |
 |---|---|---|---|
-| 1 | 单元测试全部通过 | `npm test` — 113 用例（99 旧 + 14 新） | ✅ |
+| 1 | 单元测试全部通过 | `npm test` — 132 用例（99 旧 + 33 新） | ✅ |
 | 2 | level.scene 正常加载 level-001.json | 在 Cocos Creator 运行场景 | ⬜ |
-| 3 | block-A 格子正确渲染：(1,1)(2,1)(1,2) | 场景运行 + 观察 | ⬜ |
+| 3 | block-A 格子正确渲染：(1,1)(2,1)(1,2)(2,2) | 场景运行 + 观察 | ⬜ |
 | 4 | block-B 格子正确渲染：(3,1)(3,2)(4,2) | 场景运行 + 观察 | ⬜ |
-| 5 | block-A 与 block-B 之间有红色 wall 指示器 | 检查 (2,1)↔(3,1) 边界 | ⬜ |
+| 5 | block-A 与 block-B 之间有 2 条红色 wall 指示器 | 检查 (2,1)↔(3,1) 和 (2,2)↔(3,2) | ⬜ |
 | 6 | block 内部无 wall 指示器 | block-A 内部边界无红色条 | ⬜ |
 | 7 | 逻辑叠加层切换正常 | `toggleLogicOverlay()` 按钮 | ⬜ |
-| 8 | 现有场景（dualGridTest、tiledMapTest）不受影响 | 分别运行旧场景 | ⬜ |
+| 8 | 左键拖拽 block，ghost 像素级跟随鼠标 | 场景运行 + 操作 | ⬜ |
+| 9 | 拖拽时预览层显示绿色（有效）/ 红色（无效）矩形 | 移入空格 vs 移出边界观察 | ⬜ |
+| 10 | 松开鼠标 → block 吸附到最近有效格 | 在有效位置松开观察 | ⬜ |
+| 11 | 无有效落点 → block 回到原位 | 拖入角落无空间处松开 | ⬜ |
+| 12 | 移动后 wall 指示器自动重建 | 拖拽后观察新旧边界 | ⬜ |
+| 13 | 右键 edge 仍可切换墙壁（拖拽时不触发） | 分别测试两种操作 | ⬜ |
+| 14 | 现有场景（dualGridTest、tiledMapTest）不受影响 | 分别运行旧场景 | ⬜ |
