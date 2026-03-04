@@ -291,7 +291,7 @@
     },
     "visualTileSize": 24,
     "showDebugMask": false,
-    "showLogicOverlay": false,
+    "showLogicOverlay": true,
     "tileFrames": [
       {
         "__uuid__": "51897146-09da-401e-9c7c-ed84a37c3e48@f9941",

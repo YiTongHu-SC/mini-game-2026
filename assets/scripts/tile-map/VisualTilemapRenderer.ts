@@ -144,6 +144,20 @@ export class VisualTilemapRenderer {
     }
   }
 
+  // ──────────────────── tint ────────────────────
+
+  /**
+   * 直接设置指定表现格 Sprite 的颜色（不影响 spriteFrame）。
+   * 用于高亮拖拽中的 block，在 refreshAll / refreshLocal 后会自动重置。
+   */
+  setCellTint(vx: number, vy: number, color: Color): void {
+    if (vx < 0 || vx >= this.cols || vy < 0 || vy >= this.rows) return;
+    const node = this.cellNodes[vy]?.[vx];
+    if (!node) return;
+    const sprite = node.getComponent(Sprite);
+    if (sprite) sprite.color = color;
+  }
+
   // ──────────────────── private ────────────────────
 
   private updateCell(x: number, y: number, resolver: AutoTileResolver, grid: OccupancyGrid): void {

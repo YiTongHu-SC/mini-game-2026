@@ -45,3 +45,5 @@ export type { CellCoord, BlockData, LevelData } from './LevelTypes';
 
 export { LevelLoader } from './LevelLoader';
 export type { LevelLoadResult } from './LevelLoader';
+
+export { BlockRegistry } from './BlockRegistry';
