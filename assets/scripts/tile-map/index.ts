@@ -24,3 +24,12 @@ export { getConnectedRegion, getAllRegions } from './ConnectedRegion';
 export { VisualTilemapRenderer } from './VisualTilemapRenderer';
 
 export { TiledMapController } from './TiledMapController';
+
+// ── Dual-grid system ──
+
+export { STRIDE, visualGridSize } from './DualGridTypes';
+export type { VisualCellType, VisualCellInfo, OccupancyRule } from './DualGridTypes';
+
+export { DualGridMapper } from './DualGridMapper';
+
+export { DualGridController } from './DualGridController';
