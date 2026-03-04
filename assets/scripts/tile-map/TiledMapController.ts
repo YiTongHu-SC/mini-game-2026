@@ -65,6 +65,12 @@ export class TiledMapController extends Component {
       this.showDebugMask,
     );
 
+    // Resize parent UITransform to cover the full grid so touch hit-testing works everywhere
+    const ut = this.node.getComponent(UITransform);
+    if (ut) {
+      ut.setContentSize(this.cols * this.tileSize, this.rows * this.tileSize);
+    }
+
     // Load a default test pattern: hollow rectangle
     this.loadHollowRect();
 
