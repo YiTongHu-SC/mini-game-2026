@@ -30,7 +30,9 @@ import {
   Graphics,
   input,
   Input,
+  assetManager,
 } from 'cc';
+import { EDITOR } from 'cc/env';
 import { OccupancyGrid } from '../tile-map/OccupancyGrid';
 import { AutoTileResolver } from '../tile-map/AutoTileResolver';
 import { createDefaultConfig } from '../tile-map/TileMapConfig';
@@ -43,6 +45,15 @@ import { LevelData, CellCoord } from '../tile-map/LevelTypes';
 import { BlockRegistry } from '../tile-map/BlockRegistry';
 
 const { ccclass, property } = _decorator;
+
+/* eslint-disable @typescript-eslint/no-namespace */
+/** Editor global — only available inside Cocos Creator editor process. */
+declare namespace Editor {
+  namespace Message {
+    function request(channel: string, method: string, ...args: unknown[]): Promise<unknown>;
+  }
+}
+/* eslint-enable @typescript-eslint/no-namespace */
 
 // ──────────────────── drag state ────────────────────
 
@@ -63,6 +74,29 @@ interface DragState {
 /** Fallback layer value for UI_2D (1 << 25). */
 const UI_2D_LAYER = 1 << 25;
 
+/**
+ * Tile index (0–15) → (row, col) in a 4×4 tileset grid.
+ * Matches the tile_rX_cY naming convention from split-image tool.
+ */
+const TILE_RC: readonly [number, number][] = [
+  [1, 2], // 0: isolated
+  [3, 0], // 1: full interior
+  [2, 1], // 2: top edge
+  [2, 3], // 3: left edge
+  [0, 3], // 4: bottom edge
+  [0, 1], // 5: right edge
+  [3, 3], // 6: inner corner TL
+  [0, 0], // 7: inner corner BL
+  [3, 1], // 8: inner corner BR
+  [2, 0], // 9: inner corner TR
+  [1, 3], // 10: outer corner BR
+  [0, 2], // 11: outer corner TR
+  [1, 1], // 12: outer corner TL
+  [2, 2], // 13: outer corner BL
+  [1, 0], // 14: double inner TL+BR
+  [3, 2], // 15: double inner TR+BL
+];
+
 @ccclass('LevelController')
 export class LevelController extends Component {
   // ── Editor properties ──
@@ -81,6 +115,20 @@ export class LevelController extends Component {
 
   @property({ type: [SpriteFrame], tooltip: 'Tileset sprite frames (16 items, index = mask)' })
   tileFrames: SpriteFrame[] = [];
+
+  @property({ tooltip: 'tile 图片所在目录（相对 assets/，如 textures/grass_1_split）' })
+  tileDir: string = '';
+
+  @property({
+    displayName: '🔗 绑定 TileFrames',
+    tooltip: '从 tileDir 目录按 tile_rX_cY 命名自动填充 tileFrames（16 张）',
+  })
+  get bindTileFrames(): boolean {
+    return false;
+  }
+  set bindTileFrames(_v: boolean) {
+    this._autoBindTileFrames();
+  }
 
   // ── Runtime instances ──
 
@@ -752,6 +800,66 @@ export class LevelController extends Component {
     input.off(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
     input.off(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
     input.off(Input.EventType.MOUSE_UP, this.onMouseUp, this);
+  }
+
+  // ──────────────────── auto-bind tile frames ────────────────────
+
+  /**
+   * 从 tileDir 目录按 tile_rX_cY 命名加载 SpriteFrame 并填充 tileFrames。
+   * 仅在编辑器环境下生效，通过 Editor asset-db API 查询资源 UUID，
+   * 再用 assetManager.loadAny 加载对应的 SpriteFrame 子资源（@f9941）。
+   */
+  private _autoBindTileFrames(): void {
+    if (!EDITOR) return;
+    if (!this.tileDir) {
+      console.warn('[LevelController] tileDir 未设置，请在 Inspector 中填入目录路径');
+      return;
+    }
+    const dir = this.tileDir.replace(/^\/+|\/+$/g, '');
+    this._loadTileFrames(dir);
+  }
+
+  private async _loadTileFrames(dir: string): Promise<void> {
+    let bound = 0;
+    const frames: SpriteFrame[] = [];
+
+    for (let i = 0; i < 16; i++) {
+      const [r, c] = TILE_RC[i];
+      const name = `tile_r${r}_c${c}`;
+      const dbUrl = `db://assets/${dir}/${name}.png`;
+
+      try {
+        const info = (await Editor.Message.request('asset-db', 'query-asset-info', dbUrl)) as
+          | { uuid: string }
+          | null
+          | undefined;
+        if (!info?.uuid) {
+          console.warn(`[LevelController] asset not found: ${dbUrl}`);
+          frames.push(undefined as unknown as SpriteFrame);
+          continue;
+        }
+        // PNG 的 SpriteFrame 子资源固定后缀为 @f9941
+        const sfUuid = `${info.uuid}@f9941`;
+        const frame = await new Promise<SpriteFrame | null>(resolve => {
+          assetManager.loadAny<SpriteFrame>(sfUuid, (err, asset) => {
+            resolve(err ? null : asset);
+          });
+        });
+        if (frame) {
+          frames.push(frame);
+          bound++;
+        } else {
+          console.warn(`[LevelController] SpriteFrame load failed: ${name}`);
+          frames.push(undefined as unknown as SpriteFrame);
+        }
+      } catch (e) {
+        console.warn(`[LevelController] error loading ${name}: ${e}`);
+        frames.push(undefined as unknown as SpriteFrame);
+      }
+    }
+
+    this.tileFrames = frames;
+    console.log(`[LevelController] 已绑定 ${bound}/16 tile frames`);
   }
 
   /** 切换逻辑叠加层显示。可绑定到 UI 按钮。 */
