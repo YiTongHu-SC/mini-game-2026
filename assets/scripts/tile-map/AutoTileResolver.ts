@@ -1,8 +1,8 @@
 /**
  * AutoTileResolver — 规则解析器
  *
- * 给定一个格子坐标，从 OccupancyGrid 读取 4 邻域占用状态，
- * 计算 4-bit mask，再通过 TileMapConfig.maskTable 查表得到 tileIndex。
+ * 给定一个格子坐标，从 OccupancyGrid 读取 8 邻域占用状态，
+ * 计算 8-bit mask，再通过 TileMapConfig.maskTable 查表得到 tileIndex。
  *
  * 零 Cocos 依赖 — 可在 Jest 中直接测试。
  */
@@ -76,18 +76,26 @@ export class AutoTileResolver {
   // ──────────────────── private ────────────────────
 
   /**
-   * Compute the 4-bit neighbour mask for an occupied cell.
-   *   bit0 = Up    occupied?  → +1
-   *   bit1 = Right occupied?  → +2
-   *   bit2 = Down  occupied?  → +4
-   *   bit3 = Left  occupied?  → +8
+   * Compute the 8-bit neighbour mask for an occupied cell.
+   *   bit0 = T   (1)   — (x, y+1)
+   *   bit1 = TR  (2)   — (x+1, y+1)
+   *   bit2 = R   (4)   — (x+1, y)
+   *   bit3 = BR  (8)   — (x+1, y-1)
+   *   bit4 = B   (16)  — (x, y-1)
+   *   bit5 = BL  (32)  — (x-1, y-1)
+   *   bit6 = L   (64)  — (x-1, y)
+   *   bit7 = TL  (128) — (x-1, y+1)
    */
   private computeMask(x: number, y: number): number {
     let mask = 0;
-    if (this.grid.getCell(x, y + 1) === 1) mask |= BIT.UP;
-    if (this.grid.getCell(x + 1, y) === 1) mask |= BIT.RIGHT;
-    if (this.grid.getCell(x, y - 1) === 1) mask |= BIT.DOWN;
-    if (this.grid.getCell(x - 1, y) === 1) mask |= BIT.LEFT;
+    if (this.grid.getCell(x, y + 1) === 1) mask |= BIT.T;
+    if (this.grid.getCell(x + 1, y + 1) === 1) mask |= BIT.TR;
+    if (this.grid.getCell(x + 1, y) === 1) mask |= BIT.R;
+    if (this.grid.getCell(x + 1, y - 1) === 1) mask |= BIT.BR;
+    if (this.grid.getCell(x, y - 1) === 1) mask |= BIT.B;
+    if (this.grid.getCell(x - 1, y - 1) === 1) mask |= BIT.BL;
+    if (this.grid.getCell(x - 1, y) === 1) mask |= BIT.L;
+    if (this.grid.getCell(x - 1, y + 1) === 1) mask |= BIT.TL;
     return mask;
   }
 }

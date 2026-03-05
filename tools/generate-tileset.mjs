@@ -3,14 +3,16 @@
  * generate-tileset.mjs
  *
  * Generates a 640×40 placeholder tileset PNG (16 tiles × 40px each).
- * Each tile represents a 4-bit mask:
- *   bit0 = Up(1), bit1 = Right(2), bit2 = Down(4), bit3 = Left(8)
+ * Each tile represents one of 16 canonical 8-neighbor patterns
+ * defined in docs/bit_mask.md.
  *
  * Tile visual:
  *   - Grey (#888) fill for occupied area
- *   - Green (#4a4) border on "connected" sides (neighbour present)
- *   - Red   (#a44) border on "open" sides (no neighbour)
- *   - White text showing mask number (approximated with pixel font)
+ *   - 3×3 dot grid showing neighbor pattern:
+ *     Green (#4a4) dot = neighbor present
+ *     Red   (#a44) dot = neighbor absent
+ *     White dot   = center cell (self)
+ *   - White text showing tile index
  *
  * Uses only Node.js built-in modules (no native deps).
  *
@@ -94,38 +96,136 @@ function fillRect(pixels, imgW, x0, y0, w, h, color) {
   }
 }
 
+// 16 canonical 8-neighbor patterns from docs/bit_mask.md
+// Each entry: [topRow, midRow, botRow] where 1 = neighbor present
+const PATTERNS = [
+  [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ], // 0: isolated
+  [
+    [1, 1, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+  ], // 1: full interior
+  [
+    [0, 0, 0],
+    [1, 0, 1],
+    [1, 1, 1],
+  ], // 2: top edge
+  [
+    [0, 1, 1],
+    [0, 0, 1],
+    [0, 1, 1],
+  ], // 3: left edge
+  [
+    [1, 1, 1],
+    [1, 0, 1],
+    [0, 0, 0],
+  ], // 4: bottom edge
+  [
+    [1, 1, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+  ], // 5: right edge
+  [
+    [0, 1, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+  ], // 6: inner corner TL
+  [
+    [1, 1, 1],
+    [1, 0, 1],
+    [0, 1, 1],
+  ], // 7: inner corner BL
+  [
+    [1, 1, 1],
+    [1, 0, 1],
+    [1, 1, 0],
+  ], // 8: inner corner BR
+  [
+    [1, 1, 0],
+    [1, 0, 1],
+    [1, 1, 1],
+  ], // 9: inner corner TR
+  [
+    [0, 0, 0],
+    [0, 0, 1],
+    [0, 1, 1],
+  ], // 10: outer corner BR
+  [
+    [0, 1, 1],
+    [0, 0, 1],
+    [0, 0, 0],
+  ], // 11: outer corner TR
+  [
+    [1, 1, 0],
+    [1, 0, 0],
+    [0, 0, 0],
+  ], // 12: outer corner TL
+  [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+  ], // 13: outer corner BL
+  [
+    [0, 1, 1],
+    [1, 0, 1],
+    [1, 1, 0],
+  ], // 14: double inner TL+BR
+  [
+    [1, 1, 0],
+    [1, 0, 1],
+    [0, 1, 1],
+  ], // 15: double inner TR+BL
+];
+
+const DOT_SIZE = 5; // pixel size of each dot in 3×3 grid
+const WHITE = [0xff, 0xff, 0xff];
+
 function generateTileset() {
   const pixels = new Uint8Array(W * H * 3);
 
   // Background fill
   fillRect(pixels, W, 0, 0, W, H, BG);
 
-  for (let mask = 0; mask < 16; mask++) {
-    const ox = mask * TILE; // tile origin x
+  for (let tileIdx = 0; tileIdx < 16; tileIdx++) {
+    const ox = tileIdx * TILE; // tile origin x
+    const pattern = PATTERNS[tileIdx];
 
-    // Fill interior
+    // Fill interior with grey
     fillRect(pixels, W, ox + BORDER, BORDER, TILE - BORDER * 2, TILE - BORDER * 2, FILL);
 
-    const up = !!(mask & 1);
-    const right = !!(mask & 2);
-    const down = !!(mask & 4);
-    const left = !!(mask & 8);
+    // Draw 3×3 dot grid showing the neighbor pattern
+    // Grid layout (screen coordinates, y-down):
+    //   row 0: TL T TR  (top of tile = y+1 in game coords)
+    //   row 1: L  x R
+    //   row 2: BL B BR  (bottom of tile = y-1 in game coords)
+    const gridStartX = ox + Math.floor((TILE - 3 * DOT_SIZE - 2 * 2) / 2);
+    const gridStartY = 4; // top padding
 
-    // Top border
-    fillRect(pixels, W, ox, 0, TILE, BORDER, up ? CONNECTED : OPEN);
-    // Right border
-    fillRect(pixels, W, ox + TILE - BORDER, 0, BORDER, TILE, right ? CONNECTED : OPEN);
-    // Bottom border
-    fillRect(pixels, W, ox, TILE - BORDER, TILE, BORDER, down ? CONNECTED : OPEN);
-    // Left border
-    fillRect(pixels, W, ox, 0, BORDER, TILE, left ? CONNECTED : OPEN);
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const dx = gridStartX + col * (DOT_SIZE + 2);
+        const dy = gridStartY + row * (DOT_SIZE + 2);
 
-    // Draw mask number in center (white)
-    const numStr = String(mask);
-    const textW = numStr.length * 4 - 1; // 3px char + 1px gap
+        if (row === 1 && col === 1) {
+          // Center cell (self) — always white
+          fillRect(pixels, W, dx, dy, DOT_SIZE, DOT_SIZE, WHITE);
+        } else {
+          const isPresent = pattern[row][col] === 1;
+          fillRect(pixels, W, dx, dy, DOT_SIZE, DOT_SIZE, isPresent ? CONNECTED : OPEN);
+        }
+      }
+    }
+
+    // Draw tile index number below the dot grid
+    const numStr = String(tileIdx);
+    const textW = numStr.length * 4 - 1;
     const tx = ox + Math.floor((TILE - textW) / 2);
-    const ty = Math.floor((TILE - 5) / 2);
-    drawNumber(pixels, W, tx, ty, mask, [0xff, 0xff, 0xff]);
+    const ty = TILE - 7; // near bottom
+    drawNumber(pixels, W, tx, ty, tileIdx, WHITE);
   }
 
   return pixels;
@@ -195,9 +295,9 @@ function encodePNG(pixels, w, h) {
 /**
  * Extract a single tile's TILE×TILE pixels from the full strip.
  */
-function extractTile(allPixels, mask) {
+function extractTile(allPixels, tileIdx) {
   const tilePixels = new Uint8Array(TILE * TILE * 3);
-  const ox = mask * TILE;
+  const ox = tileIdx * TILE;
   for (let y = 0; y < TILE; y++) {
     for (let x = 0; x < TILE; x++) {
       const srcIdx = (y * W + ox + x) * 3;
@@ -226,10 +326,10 @@ writeFileSync(outPath, png);
 console.log(`✅ Generated ${outPath}  (${W}×${H}, ${png.length} bytes)`);
 
 // 2. Individual tiles tile-00.png … tile-15.png (drag-and-drop friendly)
-for (let mask = 0; mask < 16; mask++) {
-  const tilePixels = extractTile(pixels, mask);
+for (let tileIdx = 0; tileIdx < 16; tileIdx++) {
+  const tilePixels = extractTile(pixels, tileIdx);
   const tilePng = encodePNG(tilePixels, TILE, TILE);
-  const name = `tile-${String(mask).padStart(2, '0')}.png`;
+  const name = `tile-${String(tileIdx).padStart(2, '0')}.png`;
   writeFileSync(resolve(tilesDir, name), tilePng);
 }
 console.log(`✅ Generated ${tilesDir}/tile-00.png … tile-15.png  (${TILE}×${TILE} each)`);

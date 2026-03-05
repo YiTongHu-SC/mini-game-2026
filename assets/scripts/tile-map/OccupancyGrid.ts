@@ -12,12 +12,16 @@ export interface GridCoord {
   y: number;
 }
 
-/** 4-directional neighbour offsets (Up / Right / Down / Left) */
+/** 8-directional neighbour offsets (clockwise from Top) */
 const NEIGHBOURS: readonly GridCoord[] = [
-  { x: 0, y: 1 }, // Up
-  { x: 1, y: 0 }, // Right
-  { x: 0, y: -1 }, // Down
-  { x: -1, y: 0 }, // Left
+  { x: 0, y: 1 }, // T
+  { x: 1, y: 1 }, // TR
+  { x: 1, y: 0 }, // R
+  { x: 1, y: -1 }, // BR
+  { x: 0, y: -1 }, // B
+  { x: -1, y: -1 }, // BL
+  { x: -1, y: 0 }, // L
+  { x: -1, y: 1 }, // TL
 ];
 
 export class OccupancyGrid {
@@ -48,7 +52,7 @@ export class OccupancyGrid {
 
   /**
    * Set a cell to occupied (1) or empty (0).
-   * If the value actually changes, the cell and its 4 neighbours are marked dirty.
+   * If the value actually changes, the cell and its 8 neighbours are marked dirty.
    */
   setCell(x: number, y: number, value: 0 | 1): void {
     if (x < 0 || x >= this.cols || y < 0 || y >= this.rows) return;
@@ -74,7 +78,7 @@ export class OccupancyGrid {
     return result;
   }
 
-  /** Mark a cell + its 4 neighbours as dirty (bounds-checked). */
+  /** Mark a cell + its 8 neighbours as dirty (bounds-checked). */
   private markDirty(x: number, y: number): void {
     this.addDirty(x, y);
     for (const n of NEIGHBOURS) {

@@ -40,7 +40,10 @@ export class TiledMapController extends Component {
   @property({ tooltip: 'Show mask debug labels' })
   showDebugMask: boolean = true;
 
-  @property({ type: [SpriteFrame], tooltip: 'Tileset sprite frames (16 items, index = mask)' })
+  @property({
+    type: [SpriteFrame],
+    tooltip: 'Tileset sprite frames (16 items, index = tile pattern)',
+  })
   tileFrames: SpriteFrame[] = [];
 
   // ── Runtime instances ──
@@ -163,43 +166,131 @@ export class TiledMapController extends Component {
   }
 
   /**
-   * Preview all 16 mask cases in a 4×4 grid.
+   * Preview all 16 tile patterns in a 4×4 grid.
+   * Each pattern occupies a 5×5 area (center cell + 8 neighbors), spaced by 5.
    * Call from a UI button for tileset verification.
    */
   runMaskPreview(): void {
-    // Reset grid to fit 4×4 in top-left
     this.grid.clear();
-    // We need at least a 6×6 grid to fit 4×4 island cells with borders
-    // Approach: place each mask case as an isolated cell surrounded by
-    // exactly the right neighbours
 
-    // Simpler: just fill a 4×4 and manually set neighbours
-    // Actually, let's use a specialized layout:
-    // For each mask 0..15, place an occupied cell at known position
-    // and add neighbors that produce exactly that mask.
+    // 16 canonical patterns from docs/bit_mask.md
+    // Each entry: [topRow, midRow, botRow] where row = [left, center, right]
+    const patterns: number[][][] = [
+      [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+      ], // 0: isolated
+      [
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1],
+      ], // 1: full interior
+      [
+        [0, 0, 0],
+        [1, 0, 1],
+        [1, 1, 1],
+      ], // 2: top edge
+      [
+        [0, 1, 1],
+        [0, 0, 1],
+        [0, 1, 1],
+      ], // 3: left edge
+      [
+        [1, 1, 1],
+        [1, 0, 1],
+        [0, 0, 0],
+      ], // 4: bottom edge
+      [
+        [1, 1, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+      ], // 5: right edge
+      [
+        [0, 1, 1],
+        [1, 0, 1],
+        [1, 1, 1],
+      ], // 6: inner corner TL
+      [
+        [1, 1, 1],
+        [1, 0, 1],
+        [0, 1, 1],
+      ], // 7: inner corner BL
+      [
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 1, 0],
+      ], // 8: inner corner BR
+      [
+        [1, 1, 0],
+        [1, 0, 1],
+        [1, 1, 1],
+      ], // 9: inner corner TR
+      [
+        [0, 0, 0],
+        [0, 0, 1],
+        [0, 1, 1],
+      ], // 10: outer corner BR
+      [
+        [0, 1, 1],
+        [0, 0, 1],
+        [0, 0, 0],
+      ], // 11: outer corner TR
+      [
+        [1, 1, 0],
+        [1, 0, 0],
+        [0, 0, 0],
+      ], // 12: outer corner TL
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+      ], // 13: outer corner BL
+      [
+        [0, 1, 1],
+        [1, 0, 1],
+        [1, 1, 0],
+      ], // 14: double inner TL+BR
+      [
+        [1, 1, 0],
+        [1, 0, 1],
+        [0, 1, 1],
+      ], // 15: double inner TR+BL
+    ];
 
-    const startX = 1;
-    const startY = 1;
+    const startX = 2;
+    const startY = 2;
 
-    for (let mask = 0; mask < 16; mask++) {
-      const col = mask % 4;
-      const row = Math.floor(mask / 4);
-      // Each "cell island" occupies a 3×3 area, spaced by 3
-      const cx = startX + col * 3;
-      const cy = startY + row * 3;
+    for (let idx = 0; idx < 16; idx++) {
+      const col = idx % 4;
+      const row = Math.floor(idx / 4);
+      const cx = startX + col * 4;
+      const cy = startY + row * 4;
 
-      if (cx >= this.cols || cy >= this.rows) continue;
+      if (cx + 1 >= this.cols || cy + 1 >= this.rows) continue;
+      if (cx - 1 < 0 || cy - 1 < 0) continue;
 
+      const [top, mid, bot] = patterns[idx];
+
+      // Center cell always occupied
       this.grid.setCell(cx, cy, 1);
-      if (mask & 1 && cy + 1 < this.rows) this.grid.setCell(cx, cy + 1, 1); // Up
-      if (mask & 2 && cx + 1 < this.cols) this.grid.setCell(cx + 1, cy, 1); // Right
-      if (mask & 4 && cy - 1 >= 0) this.grid.setCell(cx, cy - 1, 1); // Down
-      if (mask & 8 && cx - 1 >= 0) this.grid.setCell(cx - 1, cy, 1); // Left
+
+      // Top row (y+1): TL, T, TR
+      if (top[0]) this.grid.setCell(cx - 1, cy + 1, 1);
+      if (top[1]) this.grid.setCell(cx, cy + 1, 1);
+      if (top[2]) this.grid.setCell(cx + 1, cy + 1, 1);
+      // Mid row: L, R
+      if (mid[0]) this.grid.setCell(cx - 1, cy, 1);
+      if (mid[2]) this.grid.setCell(cx + 1, cy, 1);
+      // Bot row (y-1): BL, B, BR
+      if (bot[0]) this.grid.setCell(cx - 1, cy - 1, 1);
+      if (bot[1]) this.grid.setCell(cx, cy - 1, 1);
+      if (bot[2]) this.grid.setCell(cx + 1, cy - 1, 1);
     }
 
     this.grid.getDirtyAndClear();
     this.renderer.refreshAll(this.resolver, this.grid);
-    console.log('[TiledMapController] Mask preview: 16 cases displayed');
+    console.log('[TiledMapController] Mask preview: 16 patterns displayed');
   }
 
   /** Clear the grid entirely. */

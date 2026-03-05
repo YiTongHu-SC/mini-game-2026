@@ -14,7 +14,7 @@
 │ OccupancyGrid│ AutoTileResolver  │ VisualTilemap-     │
 │ (逻辑层)     │ (规则解析器)       │ Renderer (渲染器)  │
 │ 0/1 二值网格  │ mask→tileIndex    │ Sprite 节点网格    │
-│ dirty 跟踪   │ 4-bit 邻域查表     │ 全量/局部刷新      │
+│ dirty 跟踪   │ 8-bit 邻域查表     │ 全量/局部刷新      │
 ├──────────────┼───────────────────┤                    │
 │ Connected-   │ TileMapConfig     │                    │
 │ Region (BFS) │ bit 序/映射表      │                    │
@@ -61,46 +61,56 @@ tools/
 
 ## 3. Tileset 规范
 
-### 3.1 Bit 顺序（固定约定）
+### 3.1 Bit 顺序（固定约定，顺时针从上方开始）
 
 | Bit | 方向 | 值 |
 |---|---|---|
-| bit0 | Up（上） | 1 |
-| bit1 | Right（右） | 2 |
-| bit2 | Down（下） | 4 |
-| bit3 | Left（左） | 8 |
+| bit0 | T（上） | 1 |
+| bit1 | TR（右上） | 2 |
+| bit2 | R（右） | 4 |
+| bit3 | BR（右下） | 8 |
+| bit4 | B（下） | 16 |
+| bit5 | BL（左下） | 32 |
+| bit6 | L（左） | 64 |
+| bit7 | TL（左上） | 128 |
 
-### 3.2 Mask → Tile 索引对照表
+### 3.2 Tile 索引对照表（16 种 canonical pattern）
 
-| Mask | 二进制 | 含义 | 默认 tileIndex |
-|---|---|---|---|
-| 0 | 0000 | 孤立格 | 0 |
-| 1 | 0001 | 仅上方有邻 | 1 |
-| 2 | 0010 | 仅右方有邻 | 2 |
-| 3 | 0011 | 上+右 | 3 |
-| 4 | 0100 | 仅下方有邻 | 4 |
-| 5 | 0101 | 上+下（竖直通道） | 5 |
-| 6 | 0110 | 右+下 | 6 |
-| 7 | 0111 | 上+右+下 | 7 |
-| 8 | 1000 | 仅左方有邻 | 8 |
-| 9 | 1001 | 上+左 | 9 |
-| 10 | 1010 | 右+左（水平通道） | 10 |
-| 11 | 1011 | 上+右+左 | 11 |
-| 12 | 1100 | 下+左 | 12 |
-| 13 | 1101 | 上+下+左 | 13 |
-| 14 | 1110 | 右+下+左 | 14 |
-| 15 | 1111 | 四面全有（内部） | 15 |
+8-bit raw mask（256 种组合）通过**对角线遮罩 + 查表映射**归约到 16 种 tile pattern。
+对角线遮罩规则：对角位仅在两个相邻基数方向均 occupied 时才生效。
 
-默认使用 **恒等映射** (`tileIndex = mask`)。可通过 `TileMapConfig.maskTable` 自定义映射以适配不同美术排列。
+| Tile | Canonical Mask | 含义 | 3×3 pattern |
+|------|---------------|------|------------|
+| 0 | 0 | 孤立格 | 全空 |
+| 1 | 255 | 内部（全填充） | 全满 |
+| 2 | 124 | 上边 | 缺 T |
+| 3 | 31 | 左边 | 缺 L |
+| 4 | 199 | 下边 | 缺 B |
+| 5 | 241 | 右边 | 缺 R |
+| 6 | 127 | 内凹角 TL | 缺 TL 对角 |
+| 7 | 223 | 内凹角 BL | 缺 BL 对角 |
+| 8 | 247 | 内凹角 BR | 缺 BR 对角 |
+| 9 | 253 | 内凹角 TR | 缺 TR 对角 |
+| 10 | 28 | 外凸角 BR | 仅 R+BR+B |
+| 11 | 7 | 外凸角 TR | 仅 T+TR+R |
+| 12 | 193 | 外凸角 TL | 仅 L+TL+T |
+| 13 | 112 | 外凸角 BL | 仅 B+BL+L |
+| 14 | 119 | 双内凹 TL+BR | 缺 TL 和 BR |
+| 15 | 221 | 双内凹 TR+BL | 缺 TR 和 BL |
+
+使用 **256 → 16 查表映射**：`TileMapConfig.maskTable` 由 `createDefaultMaskTable()` 自动生成。
+详细 pattern 定义见 `docs/bit_mask.md`。
 
 ### 3.3 占位图集说明
 
 - 尺寸：640 × 40 px（16 个 40×40 tile 横排）
 - 用色约定：
   - 灰色 `#888` 填充 = 占用区域
-  - **绿色边** = 该方向有相邻格子（connected）
-  - **红色边** = 该方向无相邻格子（open/border）
-  - 白色数字 = mask 值
+  - 3×3 点阵显示邻域 pattern：
+    - **绿色点** = 该方向有相邻格子（occupied）
+    - **红色点** = 该方向无相邻格子（empty）
+    - **白色点** = 中心格（self）
+  - 白色数字 = tile 索引
 - 重新生成：`node tools/generate-tileset.mjs`
 
 ---
@@ -124,8 +134,8 @@ npx jest --config jest.config.mjs --coverage
 
 | 测试文件 | 用例数 | 覆盖内容 |
 |---|---|---|
-| `OccupancyGrid.test.ts` | 11 | 读写、越界、dirty 跟踪、批量操作 |
-| `AutoTileResolver.test.ts` | 12 | 16 种 mask 全覆盖、自定义映射、批量解析、边界处理 |
+| `OccupancyGrid.test.ts` | 11 | 读写、越界、dirty 跟踪（8 邻域）、批量操作 |
+| `AutoTileResolver.test.ts` | 25+ | 16 种 canonical pattern、对角线遮罩、fallback、自定义映射、批量解析、边界处理 |
 | `ConnectedRegion.test.ts` | 11 | 孤立、线、L 形、T 形、十字、断连、对角不连通、全局查找 |
 
 ### 4.2 编辑器内可视化测试（渲染层）

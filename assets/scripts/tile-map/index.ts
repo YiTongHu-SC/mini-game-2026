@@ -13,6 +13,8 @@ export type { ResolveResult } from './AutoTileResolver';
 
 export {
   BIT,
+  CANONICAL_MASKS,
+  applyDiagonalMask,
   createDefaultConfig,
   createDefaultMaskTable,
   MASK_DESCRIPTIONS,

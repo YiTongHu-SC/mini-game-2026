@@ -46,23 +46,25 @@ describe('OccupancyGrid', () => {
 
   // ── Dirty tracking ─────────────────────────────────
 
-  test('setCell marks self + 4 neighbours as dirty', () => {
+  test('setCell marks self + 8 neighbours as dirty', () => {
     const g = new OccupancyGrid(5, 5);
     g.setCell(2, 2, 1);
     const dirty = coordSet(g.getDirtyAndClear());
 
     // Self
     expect(dirty.has('2,2')).toBe(true);
-    // Up
-    expect(dirty.has('2,3')).toBe(true);
-    // Right
-    expect(dirty.has('3,2')).toBe(true);
-    // Down
-    expect(dirty.has('2,1')).toBe(true);
-    // Left
-    expect(dirty.has('1,2')).toBe(true);
+    // Cardinals
+    expect(dirty.has('2,3')).toBe(true); // T
+    expect(dirty.has('3,2')).toBe(true); // R
+    expect(dirty.has('2,1')).toBe(true); // B
+    expect(dirty.has('1,2')).toBe(true); // L
+    // Diagonals
+    expect(dirty.has('3,3')).toBe(true); // TR
+    expect(dirty.has('3,1')).toBe(true); // BR
+    expect(dirty.has('1,1')).toBe(true); // BL
+    expect(dirty.has('1,3')).toBe(true); // TL
 
-    expect(dirty.size).toBe(5);
+    expect(dirty.size).toBe(9);
   });
 
   test('setCell at corner clips out-of-bounds neighbours from dirty set', () => {
@@ -70,11 +72,12 @@ describe('OccupancyGrid', () => {
     g.setCell(0, 0, 1);
     const dirty = coordSet(g.getDirtyAndClear());
 
-    // Self + Right + Up (Down and Left are out of bounds)
+    // Self + Right + Up + TR (Down, Left, BL, TL, BR are out of bounds)
     expect(dirty.has('0,0')).toBe(true);
-    expect(dirty.has('1,0')).toBe(true);
-    expect(dirty.has('0,1')).toBe(true);
-    expect(dirty.size).toBe(3);
+    expect(dirty.has('1,0')).toBe(true); // R
+    expect(dirty.has('0,1')).toBe(true); // T
+    expect(dirty.has('1,1')).toBe(true); // TR
+    expect(dirty.size).toBe(4);
   });
 
   test('repeated setCell with same value produces no dirty entry', () => {
@@ -103,12 +106,13 @@ describe('OccupancyGrid', () => {
     g.setCell(3, 2, 1);
     const dirty = coordSet(g.getDirtyAndClear());
 
-    // Both should be present, and shared neighbour (2,2)→right = (3,2) counted once
+    // Both should be present, and shared neighbours counted once
     expect(dirty.has('2,2')).toBe(true);
     expect(dirty.has('3,2')).toBe(true);
-    // Total unique cells: self(2,2)+4 = 5, self(3,2)+4 = 5, but (2,2) and (3,2) overlap
-    // Unique: (1,2), (2,1), (2,2), (2,3), (3,1), (3,2), (3,3), (4,2) = 8
-    expect(dirty.size).toBe(8);
+    // self(2,2)+8 = 9 cells, self(3,2)+8 = 9 cells, overlap includes
+    // (2,2), (3,2), (3,1), (3,3), (2,1), (2,3) = 6 shared
+    // Unique: (1,1),(1,2),(1,3),(2,1),(2,2),(2,3),(3,1),(3,2),(3,3),(4,1),(4,2),(4,3) = 12
+    expect(dirty.size).toBe(12);
   });
 
   // ── Bulk helpers ────────────────────────────────────
