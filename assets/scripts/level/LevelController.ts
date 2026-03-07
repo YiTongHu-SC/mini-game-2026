@@ -335,6 +335,7 @@ export class LevelController extends Component {
 
   update(): void {
     if (this._pendingRefresh <= 0) return;
+    if (!this.mapper) return; // initLevel() 尚未完成（异步加载中）
     this._pendingRefresh--;
     if (this._pendingRefresh === 0) {
       // 延迟刷新：等 Cocos 渲染管线注册完动态节点后再刷新
