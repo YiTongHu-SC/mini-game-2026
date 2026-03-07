@@ -177,16 +177,16 @@ export class VisualTilemapRenderer {
     if (!sprite) return;
 
     const result = resolver.resolve(x, y);
+    // Always reset to pure white during render update to preserve source texture colors.
+    sprite.color = new Color(255, 255, 255, 255);
 
     if (result.tileIndex < 0 || grid.getCell(x, y) === 0) {
       // Empty cell — hide sprite
       sprite.spriteFrame = null;
-      sprite.color = new Color(40, 40, 40, 255); // dark bg
     } else {
       // Occupied cell — show corresponding tile
       const frame = this.spriteFrames[result.tileIndex] ?? null;
       sprite.spriteFrame = frame;
-      sprite.color = new Color(255, 255, 255, 255);
     }
 
     // Update debug label

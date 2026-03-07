@@ -245,6 +245,7 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 6.  new BlockManager()  +  mapper.setBlockManager ← 墙壁管理器注入
 7.  new AutoTileResolver(visualGrid, config)    ← 使用默认 maskTable
 8.  new VisualTilemapRenderer(node, ...)        ← 创建 Sprite 节点网格
+  new VisualTilemapRenderer(targetLayer, ...) ← 目标盒子渲染（优先使用 targetTileFrames）
 9.  调整 node 的 UITransform 尺寸               ← 覆盖完整表现网格
 10. buildLogicOverlay()                        ← 逻辑叠加层（默认隐藏）
 11. buildWallIndicatorLayer()                  ← 墙壁指示器容器
@@ -258,6 +259,15 @@ LevelLoader.load(data: LevelData): LevelLoadResult
 13. 注册全局鼠标事件：input.on(MOUSE_DOWN / MOUSE_MOVE / MOUSE_UP)
     （全部走全局 input，避免 node-level 事件吞噬问题）
 ```
+
+### 6.1 Tile 素材绑定
+
+`LevelController` 支持两套可独立绑定的 16 张 tile 资源：
+
+- `tileFrames`：主地图/Block 的 TileFrames（必填）
+- `targetTileFrames`：目标盒子 TileFrames（可选）
+
+若 `targetTileFrames` 未绑定，则目标盒子自动回退使用 `tileFrames`。
 
 ### 6.1 Inspector 属性
 

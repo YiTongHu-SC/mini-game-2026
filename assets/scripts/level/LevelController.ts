@@ -8,7 +8,8 @@
  *   2. 在 Canvas 下新建空 Node，添加本组件
  *   3. 将关卡 JSON 文件（如 level-001.json）拖拽到 levelData 属性
  *   4. 将 16 张 tile SpriteFrame 拖拽到 tileFrames 属性
- *   5. 运行场景，自动加载关卡数据并初始化网格
+ *   5. （可选）将目标盒子用的 16 张 SpriteFrame 拖拽到 targetTileFrames 属性
+ *   6. 运行场景，自动加载关卡数据并初始化网格
  *
  * 挂载到一个空 Node 上，该 Node 需要有 UITransform 组件（用于触摸区域）。
  */
@@ -79,9 +80,6 @@ interface TargetBoxRuntime {
   cellKeySet: Set<string>;
 }
 
-/** All target-box cell keys (union), used for fast overlap check. */
-type AllTargetCellKeys = Set<string>;
-
 /** Fallback layer value for UI_2D (1 << 25). */
 const UI_2D_LAYER = 1 << 25;
 
@@ -127,8 +125,14 @@ export class LevelController extends Component {
   @property({ type: [SpriteFrame], tooltip: 'Tileset sprite frames (16 items, index = mask)' })
   tileFrames: SpriteFrame[] = [];
 
+  @property({ type: [SpriteFrame], tooltip: 'Target-box tile frames (16 items, optional)' })
+  targetTileFrames: SpriteFrame[] = [];
+
   @property({ tooltip: 'tile 图片所在目录（相对 assets/，如 textures/grass_1_split）' })
   tileDir: string = '';
+
+  @property({ tooltip: 'target tile 图片所在目录（相对 assets/，如 textures/goal_1_split）' })
+  targetTileDir: string = '';
 
   @property({
     displayName: '🔗 绑定 TileFrames',
@@ -139,6 +143,17 @@ export class LevelController extends Component {
   }
   set bindTileFrames(_v: boolean) {
     this._autoBindTileFrames();
+  }
+
+  @property({
+    displayName: '🔗 绑定 TargetTileFrames',
+    tooltip: '从 targetTileDir 目录按 tile_rX_cY 命名自动填充 targetTileFrames（16 张）',
+  })
+  get bindTargetTileFrames(): boolean {
+    return false;
+  }
+  set bindTargetTileFrames(_v: boolean) {
+    this._autoBindTargetTileFrames();
   }
 
   // ── Runtime instances ──
@@ -240,7 +255,7 @@ export class LevelController extends Component {
       vSize.cols,
       vSize.rows,
       this.visualTileSize,
-      this.tileFrames,
+      this.getTargetTileFrames(),
       false,
     );
 
@@ -266,6 +281,13 @@ export class LevelController extends Component {
     input.on(Input.EventType.MOUSE_UP, this.onMouseUp, this);
 
     console.log(`[LevelController] Initialized: visual=${vSize.cols}×${vSize.rows}`);
+  }
+
+  /**
+   * 目标盒子渲染优先使用 targetTileFrames；未配置时回退到 tileFrames。
+   */
+  private getTargetTileFrames(): SpriteFrame[] {
+    return this.targetTileFrames.length > 0 ? this.targetTileFrames : this.tileFrames;
   }
 
   update(): void {
@@ -603,8 +625,9 @@ export class LevelController extends Component {
 
   private refreshTargetHighlight(): void {
     const matchedTargets = new Set<string>(this.blockToTarget.values());
-    const colorIdle = new Color(120, 170, 255, 120);
-    const colorDone = new Color(120, 255, 160, 140);
+    // Keep target sprites pure white to preserve source texture colors.
+    const colorIdle = new Color(255, 255, 255, 255);
+    const colorDone = new Color(255, 255, 255, 255);
 
     for (const tb of this.targetBoxes) {
       const tint = matchedTargets.has(tb.id) ? colorDone : colorIdle;
@@ -953,10 +976,20 @@ export class LevelController extends Component {
       return;
     }
     const dir = this.tileDir.replace(/^\/+|\/+$/g, '');
-    this._loadTileFrames(dir);
+    this._loadTileFrames(dir, 'main');
   }
 
-  private async _loadTileFrames(dir: string): Promise<void> {
+  private _autoBindTargetTileFrames(): void {
+    if (!EDITOR) return;
+    if (!this.targetTileDir) {
+      console.warn('[LevelController] targetTileDir 未设置，请在 Inspector 中填入目录路径');
+      return;
+    }
+    const dir = this.targetTileDir.replace(/^\/+|\/+$/g, '');
+    this._loadTileFrames(dir, 'target');
+  }
+
+  private async _loadTileFrames(dir: string, kind: 'main' | 'target'): Promise<void> {
     let bound = 0;
     const frames: SpriteFrame[] = [];
 
@@ -993,6 +1026,12 @@ export class LevelController extends Component {
         console.warn(`[LevelController] error loading ${name}: ${e}`);
         frames.push(undefined as unknown as SpriteFrame);
       }
+    }
+
+    if (kind === 'target') {
+      this.targetTileFrames = frames;
+      console.log(`[LevelController] 已绑定 ${bound}/16 target tile frames`);
+      return;
     }
 
     this.tileFrames = frames;

@@ -505,7 +505,74 @@
         "__expectedType__": "cc.SpriteFrame"
       }
     ],
+    "targetTileFrames": [
+      {
+        "__uuid__": "d2ac2bf0-7b76-49e6-a942-2b635fc5c5c8@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "e0d7d4d4-f3c6-4325-804f-4dad6015c8ca@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "cf3e206f-56ca-4f76-8c89-a2f2ab98206a@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "b61c837e-10f1-4be8-9964-309ce66e058c@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "a1ceb51f-30f4-4684-8ad4-249c04c205f5@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "aa2a9f5a-78ed-410c-b240-7086d6eda171@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "df7f1964-6354-49ca-afe0-11d1bcc3dfa7@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "b4745f0b-7d61-4840-ba17-bc5302a9e798@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "1a75111f-c9ff-48fd-bb02-b240a9ee367e@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "c4546a98-dfbf-4874-a88b-1b222503438c@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "f5f4d036-0c91-4292-a233-230aff397028@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "307f8c7f-364e-48c9-a5a1-9fa3ce9c0f02@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "e962e7a3-6465-4887-b9d2-0b6be1993d68@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "b17fe2df-1c8e-4b65-a727-4ebc3db6e996@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "b3b853e9-c78f-4e63-bec0-a617e9013a2b@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      },
+      {
+        "__uuid__": "4a694096-d0f9-40f9-aeec-00af912c34e4@f9941",
+        "__expectedType__": "cc.SpriteFrame"
+      }
+    ],
     "tileDir": "/textures/grass_0_split",
+    "targetTileDir": "/textures/bento-box_split",
     "_id": "82gp9vG/lLJZCgJdCDzk+/"
   },
   {
