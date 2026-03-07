@@ -297,6 +297,89 @@ export class BlockRegistry {
   }
 
   /**
+   * 通用分裂：检测 blockId 内所有连通分量（考虑内部墙壁），
+   * 若存在 2 个以上连通分量则拆分为多个新 block。
+   *
+   * 适用于刀具一次切出多条边后需要 N-way 分裂的场景。
+   *
+   * @returns 新 block id 数组（长度 ≥ 2）；若仍连通返回 null
+   */
+  splitDisconnectedBlock(blockId: string): string[] | null {
+    const cells = this.blockToCells.get(blockId);
+    if (!cells || cells.length < 2) return null;
+
+    const cellSet = new Set<string>(cells.map(c => `${c.x},${c.y}`));
+    const blockWalls = this.blockToWalls.get(blockId) ?? new Set<string>();
+    const visited = new Set<string>();
+    const components: CellCoord[][] = [];
+
+    for (const cell of cells) {
+      const ck = `${cell.x},${cell.y}`;
+      if (visited.has(ck)) continue;
+
+      // BFS for one connected component
+      const comp: CellCoord[] = [];
+      const queue: CellCoord[] = [{ x: cell.x, y: cell.y }];
+      visited.add(ck);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        comp.push(curr);
+        for (const dir of DIRS) {
+          const nx = curr.x + dir.x;
+          const ny = curr.y + dir.y;
+          const nk = `${nx},${ny}`;
+          if (visited.has(nk) || !cellSet.has(nk)) continue;
+          const edgeKey = wallKey({ x: curr.x, y: curr.y }, { x: nx, y: ny });
+          if (blockWalls.has(edgeKey)) continue;
+          visited.add(nk);
+          queue.push({ x: nx, y: ny });
+        }
+      }
+      components.push(comp);
+    }
+
+    if (components.length < 2) return null;
+
+    // Distribute internal walls to new components
+    const cellToComp = new Map<string, number>();
+    for (let ci = 0; ci < components.length; ci++) {
+      for (const c of components[ci]) {
+        cellToComp.set(`${c.x},${c.y}`, ci);
+      }
+    }
+    const compWalls: Set<string>[] = components.map(() => new Set<string>());
+    for (const wk of blockWalls) {
+      const [wa, wb] = parseWallKey(wk);
+      const ca = cellToComp.get(`${wa.x},${wa.y}`);
+      const cb = cellToComp.get(`${wb.x},${wb.y}`);
+      if (ca !== undefined && cb !== undefined && ca === cb) {
+        compWalls[ca].add(wk);
+      }
+    }
+
+    // Remove old block
+    for (const c of cells) this.cellToBlock.delete(`${c.x},${c.y}`);
+    this.blockToCells.delete(blockId);
+    this.blockToWalls.delete(blockId);
+
+    // Create new blocks
+    this._splitCounter++;
+    const newIds: string[] = [];
+    for (let ci = 0; ci < components.length; ci++) {
+      const suffix = String.fromCharCode(97 + (ci % 26)); // a, b, c, ...
+      const id = `${blockId}_s${this._splitCounter}${suffix}`;
+      newIds.push(id);
+      this.blockToCells.set(id, components[ci]);
+      this.blockToWalls.set(id, compWalls[ci]);
+      for (const c of components[ci]) {
+        this.cellToBlock.set(`${c.x},${c.y}`, id);
+      }
+    }
+
+    return newIds;
+  }
+
+  /**
    * 返回所有墙壁：跨 block 边界墙壁 + block 内部墙壁。
    *
    * 跨 block 边界规则与 LevelLoader.load 一致：

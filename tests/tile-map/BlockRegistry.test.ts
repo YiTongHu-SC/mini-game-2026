@@ -691,3 +691,130 @@ describe('BlockRegistry — Block internal walls', () => {
     expect(reg.getBlockWalls('rect')).toHaveLength(2);
   });
 });
+
+// ════════════════════════════════════════════════════════════════
+// splitDisconnectedBlock
+// ════════════════════════════════════════════════════════════════
+
+describe('BlockRegistry — splitDisconnectedBlock', () => {
+  test('仍连通 → 返回 null', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'A',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+          ],
+        },
+      ],
+    });
+    expect(reg.splitDisconnectedBlock('A')).toBeNull();
+  });
+
+  test('单格 block → 返回 null', () => {
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [{ id: 'X', cells: [{ x: 0, y: 0 }] }],
+    });
+    expect(reg.splitDisconnectedBlock('X')).toBeNull();
+  });
+
+  test('不存在的 blockId → 返回 null', () => {
+    const reg = new BlockRegistry({ gridCols: 4, gridRows: 4, blocks: [] });
+    expect(reg.splitDisconnectedBlock('nope')).toBeNull();
+  });
+
+  test('水平 3 格 block 中间墙壁 → 分裂为 2 个新 block', () => {
+    // [A][A][A] → add wall between (1,0)-(2,0) → left(0,0-1,0) + right(2,0)
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'A',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+          ],
+        },
+      ],
+    });
+    reg.addBlockWall({ x: 1, y: 0 }, { x: 2, y: 0 });
+    const result = reg.splitDisconnectedBlock('A');
+    expect(result).not.toBeNull();
+    expect(result!).toHaveLength(2);
+
+    // Original block removed
+    expect(reg.getBlockCells('A')).toHaveLength(0);
+
+    // New blocks have correct cells
+    const allNewCells = result!.flatMap(id => reg.getBlockCells(id));
+    const cellKeys = new Set(allNewCells.map(c => `${c.x},${c.y}`));
+    expect(cellKeys).toEqual(new Set(['0,0', '1,0', '2,0']));
+  });
+
+  test('3-way 分裂：两道墙壁将 3 格切为 3 个分量', () => {
+    // [A][A][A] → walls at (0,0)-(1,0) and (1,0)-(2,0)
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'A',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 2, y: 0 },
+          ],
+        },
+      ],
+    });
+    reg.addBlockWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+    reg.addBlockWall({ x: 1, y: 0 }, { x: 2, y: 0 });
+    const result = reg.splitDisconnectedBlock('A');
+    expect(result).not.toBeNull();
+    expect(result!).toHaveLength(3);
+
+    // Each new block has exactly 1 cell
+    for (const id of result!) {
+      expect(reg.getBlockCells(id)).toHaveLength(1);
+    }
+  });
+
+  test('分裂后内部墙壁正确分配', () => {
+    // 4-cell block: (0,0)(1,0)(0,1)(1,1), walls: (0,0)-(1,0) and (0,0)-(0,1)
+    // After wall (0,0)-(1,0) + (0,0)-(0,1), cell (0,0) is isolated; {(1,0),(0,1),(1,1)} are connected
+    const reg = new BlockRegistry({
+      gridCols: 4,
+      gridRows: 4,
+      blocks: [
+        {
+          id: 'sq',
+          cells: [
+            { x: 0, y: 0 },
+            { x: 1, y: 0 },
+            { x: 0, y: 1 },
+            { x: 1, y: 1 },
+          ],
+        },
+      ],
+    });
+    reg.addBlockWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+    reg.addBlockWall({ x: 0, y: 0 }, { x: 0, y: 1 });
+    const result = reg.splitDisconnectedBlock('sq');
+    expect(result).not.toBeNull();
+    expect(result!).toHaveLength(2);
+
+    // Isolated cell (0,0) has no internal walls; the other has none either
+    // (the walls were on the boundary between components, so discarded)
+    for (const id of result!) {
+      expect(reg.getBlockWalls(id)).toHaveLength(0);
+    }
+  });
+});

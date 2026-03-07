@@ -42,9 +42,10 @@ import { DualGridMapper } from '../tile-map/DualGridMapper';
 import { BlockManager } from '../tile-map/BlockManager';
 import { STRIDE, visualGridSize } from '../tile-map/DualGridTypes';
 import { LevelLoader } from '../tile-map/LevelLoader';
-import { LevelData, CellCoord, TargetBoxData } from '../tile-map/LevelTypes';
+import { LevelData, CellCoord, TargetBoxData, KnifeData } from '../tile-map/LevelTypes';
 import { BlockRegistry } from '../tile-map/BlockRegistry';
 import { checkTargetBoxConstraint } from '../tile-map/TargetBoxConstraint';
+import { getKnifeEdges, snapKnifePosition } from '../tile-map/KnifeEdges';
 
 const { ccclass, property } = _decorator;
 
@@ -78,6 +79,20 @@ interface TargetBoxRuntime {
   acceptBlockId?: string;
   cells: CellCoord[];
   cellKeySet: Set<string>;
+}
+
+/** 刀具运行时状态 */
+interface KnifeRuntime {
+  data: KnifeData;
+  node: Node;
+}
+
+/** 刀具拖拽状态（与 DragState 互斥） */
+interface KnifeDragState {
+  knifeId: string;
+  startMouseLocal: { x: number; y: number };
+  origEdge: number;
+  origStart: number;
 }
 
 /** Fallback layer value for UI_2D (1 << 25). */
@@ -187,6 +202,11 @@ export class LevelController extends Component {
   private dragState: DragState | null = null;
   private dropPreviewLayer!: Node;
 
+  // ── Knife system ──
+  private knives: Map<string, KnifeRuntime> = new Map();
+  private knifeDragState: KnifeDragState | null = null;
+  private knifeLayer!: Node;
+
   private _pendingRefresh = 2;
 
   // ──────────────────── lifecycle ────────────────────
@@ -269,6 +289,7 @@ export class LevelController extends Component {
     this.buildLogicOverlay();
     this.buildWallIndicatorLayer();
     this.buildDragLayers();
+    this.buildKnifeLayer();
 
     // 11. 将关卡数据写入网格
     this.applyLevelData(loadResult);
@@ -322,6 +343,21 @@ export class LevelController extends Component {
     const pixel = this.mouseToLocalPixel(event);
     if (!pixel) return;
 
+    // 优先检测刀具命中
+    const hitKnifeId = this.hitTestKnife(pixel.px, pixel.py);
+    if (hitKnifeId) {
+      const kr = this.knives.get(hitKnifeId);
+      if (!kr) return;
+      this.knifeDragState = {
+        knifeId: hitKnifeId,
+        startMouseLocal: { x: local.x, y: local.y },
+        origEdge: kr.data.edge,
+        origStart: kr.data.start,
+      };
+      console.log(`[LevelController] Knife drag start: '${hitKnifeId}'`);
+      return;
+    }
+
     const { lx, ly } = this.pixelToLogicCell(pixel.px, pixel.py);
     const blockId = this.blockRegistry.getBlockIdAt(lx, ly);
     if (!blockId) return;
@@ -361,6 +397,29 @@ export class LevelController extends Component {
   }
 
   private onMouseMove(event: EventMouse): void {
+    // ── Knife drag ──
+    if (this.knifeDragState) {
+      const pixel = this.mouseToLocalPixel(event);
+      if (!pixel) return;
+      const kr = this.knives.get(this.knifeDragState.knifeId);
+      if (!kr) return;
+      const snapped = snapKnifePosition(
+        kr.data.orientation,
+        kr.data.length,
+        this.logicCols,
+        this.logicRows,
+        pixel.px,
+        pixel.py,
+        STRIDE,
+        this.visualTileSize,
+      );
+      kr.data.edge = snapped.edge;
+      kr.data.start = snapped.start;
+      this.updateKnifeNode(kr);
+      return;
+    }
+
+    // ── Block drag ──
     if (!this.dragState) return;
 
     const local = this.mouseToLocalCentered(event);
@@ -390,6 +449,15 @@ export class LevelController extends Component {
   }
 
   private onMouseUp(event: EventMouse): void {
+    if (this.knifeDragState && event.getButton() === EventMouse.BUTTON_LEFT) {
+      console.log(
+        `[LevelController] Knife drag end: '${this.knifeDragState.knifeId}' ` +
+          `→ edge=${this.knives.get(this.knifeDragState.knifeId)?.data.edge}, ` +
+          `start=${this.knives.get(this.knifeDragState.knifeId)?.data.start}`,
+      );
+      this.knifeDragState = null;
+      return;
+    }
     if (this.dragState && event.getButton() === EventMouse.BUTTON_LEFT) {
       this.endDrag(event);
       return;
@@ -567,6 +635,11 @@ export class LevelController extends Component {
     }
     this.targetLogicGrid.getDirtyAndClear();
     this.recomputeTargetAssignments();
+
+    // 初始化刀具
+    for (const knife of loadResult.knives) {
+      this.addKnife(knife);
+    }
 
     // 同步逻辑网格到表现网格（全量）
     this.targetMapper.syncAll(this.targetLogicGrid, this.targetVisualGrid);
@@ -954,6 +1027,225 @@ export class LevelController extends Component {
         this.renderer.setCellTint(vc.x, vc.y, color);
       }
     }
+  }
+
+  // ──────────────────── knife system ────────────────────
+
+  /** 创建刀具层节点（在 start() 中调用一次）。 */
+  private buildKnifeLayer(): void {
+    this.knifeLayer = new Node('KnifeLayer');
+    const layerVal = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    this.knifeLayer.layer = layerVal;
+    this.knifeLayer.parent = this.node;
+    this.knifeLayer.setPosition(Vec3.ZERO);
+  }
+
+  /** 添加一把刀具到运行时并创建可视节点。 */
+  private addKnife(knife: KnifeData): void {
+    const data: KnifeData = { ...knife };
+    const node = new Node(`knife_${knife.id}`);
+    const layerVal = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    node.layer = layerVal;
+    node.parent = this.knifeLayer;
+
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(1, 1); // placeholder, will be set in updateKnifeNode
+    node.addComponent(Graphics);
+
+    const kr: KnifeRuntime = { data, node };
+    this.knives.set(knife.id, kr);
+    this.updateKnifeNode(kr);
+  }
+
+  /** 更新刀具节点的位置和外观。 */
+  private updateKnifeNode(kr: KnifeRuntime): void {
+    const { data, node } = kr;
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const cellPx = STRIDE * this.visualTileSize;
+
+    let cx: number;
+    let cy: number;
+    let w: number;
+    let h: number;
+    const thickness = this.visualTileSize * 0.6;
+
+    if (data.orientation === 'v') {
+      // 竖线：沿列边界 edge，覆盖行 [start, start+length)
+      cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
+      cy =
+        renderOffsetY +
+        (data.start * STRIDE + 2) * this.visualTileSize +
+        ((data.length - 1) * cellPx) / 2;
+      w = thickness;
+      h = data.length * cellPx;
+    } else {
+      // 横线：沿行边界 edge，覆盖列 [start, start+length)
+      cx =
+        renderOffsetX +
+        (data.start * STRIDE + 2) * this.visualTileSize +
+        ((data.length - 1) * cellPx) / 2;
+      cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
+      w = data.length * cellPx;
+      h = thickness;
+    }
+
+    node.setPosition(new Vec3(cx, cy, 0));
+    const ut = node.getComponent(UITransform);
+    if (!ut) return;
+    ut.setContentSize(w, h);
+
+    const g = node.getComponent(Graphics);
+    if (!g) return;
+    g.clear();
+    g.fillColor = new Color(255, 180, 0, 200);
+    g.roundRect(-w / 2, -h / 2, w, h, thickness * 0.25);
+    g.fill();
+    // border
+    g.strokeColor = new Color(200, 120, 0, 255);
+    g.lineWidth = 2;
+    g.roundRect(-w / 2, -h / 2, w, h, thickness * 0.25);
+    g.stroke();
+  }
+
+  /**
+   * 命中检测：判断像素坐标 (px, py) 是否落在某把刀具矩形区域内。
+   * @returns 命中的刀具 id，或 null
+   */
+  private hitTestKnife(px: number, py: number): string | null {
+    const vSize = visualGridSize(this.logicCols, this.logicRows);
+    const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
+    const cellPx = STRIDE * this.visualTileSize;
+    const thickness = this.visualTileSize * 0.6;
+    // 增大命中区域使其更易选取
+    const hitPad = this.visualTileSize * 0.4;
+
+    // 将 0-origin pixel 转为居中坐标（与 renderOffset 对齐）
+    const offsetX = (vSize.cols * this.visualTileSize) / 2;
+    const offsetY = (vSize.rows * this.visualTileSize) / 2;
+    const localX = px - offsetX;
+    const localY = py - offsetY;
+
+    for (const [id, kr] of this.knives) {
+      const { data } = kr;
+      let cx: number;
+      let cy: number;
+      let hw: number;
+      let hh: number;
+
+      if (data.orientation === 'v') {
+        cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
+        cy =
+          renderOffsetY +
+          (data.start * STRIDE + 2) * this.visualTileSize +
+          ((data.length - 1) * cellPx) / 2;
+        hw = thickness / 2 + hitPad;
+        hh = (data.length * cellPx) / 2 + hitPad;
+      } else {
+        cx =
+          renderOffsetX +
+          (data.start * STRIDE + 2) * this.visualTileSize +
+          ((data.length - 1) * cellPx) / 2;
+        cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
+        hw = (data.length * cellPx) / 2 + hitPad;
+        hh = thickness / 2 + hitPad;
+      }
+
+      if (localX >= cx - hw && localX <= cx + hw && localY >= cy - hh && localY <= cy + hh) {
+        return id;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 使用刀具：沿刀具覆盖的边添加墙壁，并分裂受影响的 block。
+   * 刀具使用后留在原位，可重复使用。
+   *
+   * 支持两种调用方式：
+   *   - 代码调用：`useKnife('knife-1')`
+   *   - Cocos Button EventHandler：handler=useKnife, customEventData='knife-1'
+   *     （此时第一个参数为 EventTouch，第二个为 customEventData 字符串）
+   *
+   * @returns true 若有 block 被分裂
+   */
+  useKnife(eventOrId: unknown, customEventData?: string): boolean {
+    const knifeId = typeof eventOrId === 'string' ? eventOrId : customEventData;
+    if (!knifeId) {
+      console.warn('[LevelController] useKnife: no knifeId provided');
+      return false;
+    }
+    const kr = this.knives.get(knifeId);
+    if (!kr) {
+      console.warn(`[LevelController] useKnife: knife '${knifeId}' not found`);
+      return false;
+    }
+
+    const edges = getKnifeEdges(kr.data);
+    const affectedBlocks = new Set<string>();
+
+    // 添加墙壁
+    for (const [a, b] of edges) {
+      const blockIdA = this.blockRegistry.getBlockIdAt(a.x, a.y);
+      const blockIdB = this.blockRegistry.getBlockIdAt(b.x, b.y);
+      const isSameBlock = blockIdA !== undefined && blockIdA === blockIdB;
+
+      if (isSameBlock) {
+        const added = this.blockRegistry.addBlockWall(a, b);
+        if (added) {
+          this.blockManager.addWall(a, b);
+          affectedBlocks.add(blockIdA);
+        }
+      }
+      // 跨 block 边界的已有 wall 或空格无需操作
+
+      // 更新表现网格
+      const dirty = this.mapper.syncWallChange(a, b, this.logicGrid, this.visualGrid);
+      this.renderer.refreshLocal(dirty, this.resolver, this.visualGrid);
+      this.updateWallIndicator(a, b, true);
+    }
+
+    // 分裂受影响的 block
+    let anySplit = false;
+    for (const blockId of affectedBlocks) {
+      // blockId 可能已被前一轮分裂替换，检查是否仍然存在
+      if (this.blockRegistry.getBlockCells(blockId).length === 0) continue;
+
+      const splitResult = this.blockRegistry.splitDisconnectedBlock(blockId);
+      if (splitResult) {
+        anySplit = true;
+        console.log(
+          `[LevelController] useKnife: block '${blockId}' split into ${splitResult.length} parts: ${splitResult.join(', ')}`,
+        );
+      }
+    }
+
+    if (anySplit) {
+      // 重建全部 wall
+      this.blockManager.clearWalls();
+      for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
+        this.blockManager.addWall(wa, wb);
+      }
+
+      // 全量同步 + 刷新
+      this.logicGrid.getDirtyAndClear();
+      this.mapper.syncAll(this.logicGrid, this.visualGrid);
+      this.renderer.refreshAll(this.resolver, this.visualGrid);
+      this.recomputeTargetAssignments();
+      this.refreshTargetHighlight();
+
+      // 重建 wall 指示器
+      this.clearAllWallIndicators();
+      for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
+        this.addWallIndicator(wa, wb);
+      }
+
+      if (this.showLogicOverlay) this.refreshAllOverlay();
+    }
+
+    return anySplit;
   }
 
   onDestroy(): void {

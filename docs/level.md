@@ -54,11 +54,20 @@ interface TargetBoxData {
   acceptBlockId?: string; // 限制仅允许某个 block 放入（可选）
 }
 
+interface KnifeData {
+  id: string;               // 刀具唯一标识符
+  orientation: 'h' | 'v';   // 方向：'h' 水平（沿行边界），'v' 竖直（沿列边界）
+  length: number;            // 长度（覆盖多少条逻辑格边）
+  edge: number;              // 边界索引：'v' 时为列边界 [1, gridCols-1]，'h' 时为行边界 [1, gridRows-1]
+  start: number;             // 起始行或列：'v' 时为起始行，'h' 时为起始列
+}
+
 interface LevelData {
   gridCols: number;   // 逻辑网格总列数
   gridRows: number;   // 逻辑网格总行数
   blocks: BlockData[]; // block 列表（数组顺序无关）
   targetBoxes?: TargetBoxData[]; // 目标盒子列表（可选）
+  knives?: KnifeData[];          // 刀具列表（可选）
 }
 ```
 
@@ -587,12 +596,84 @@ class BlockRegistry {
 | **getAllWalls** | 7 | 无 wall、单 wall、多 wall、平移后 wall 变化、平移后原 wall 消失 |
 | **trySplitBlock** | 10 | 仍连通不分裂（需 addBlockWall）、切断分裂、分裂后 getBlockIdAt 更新、分裂后 getAllWalls 产生新墙壁、不同 block/空格返回 null、单格不可分裂、2×2 仍连通、I 形切中间、连续分裂 |
 | **Block internal walls** | 13 | addBlockWall 同/异 block、重复、removeBlockWall、getBlockWalls、getAllWalls 含内部墙壁、不分裂时保留、moveBlock 同步移动、JSON walls 初始化、分裂后墙壁分配、多墙壁不分裂 |
+| **splitDisconnectedBlock** | 5 | 仍连通返回 null、单格返回 null、不存在 blockId 返回 null、2-way 分裂、3-way 分裂、分裂后墙壁分配 |
 
 运行命令：`npm test`（全部 **155** 用例通过）
 
 ---
 
-## 12. 验收检查清单
+## 12. 刀具系统（Knife）
+
+### 12.1 概述
+
+刀具是一种可在关卡中拖拽放置、用于分割 block 的工具。
+
+- 定义在关卡 JSON 的 `knives` 数组中
+- 方向（`orientation`）在关卡数据中固定，不可旋转
+- 拖拽移动后松开自动吸附到最近的逻辑格边界
+- 调用 `useKnife(id)` 沿覆盖的边添加墙壁并分裂 block
+- 使用后刀具留在原位，可重复使用
+- 一个关卡可包含多把刀具
+
+### 12.2 数据格式
+
+```ts
+interface KnifeData {
+  id: string;               // 唯一标识符
+  orientation: 'h' | 'v';   // 方向
+  length: number;            // 长度（逻辑格边数）
+  edge: number;              // 边界索引
+  start: number;             // 起始行/列
+}
+```
+
+`edge` 和 `start` 的含义：
+
+| orientation | edge | start | 覆盖的边对 |
+|---|---|---|---|
+| `'v'` | 列边界 [1, gridCols-1] | 起始行 | (edge-1, start+i) ↔ (edge, start+i)，i ∈ [0, length) |
+| `'h'` | 行边界 [1, gridRows-1] | 起始列 | (start+i, edge-1) ↔ (start+i, edge)，i ∈ [0, length) |
+
+### 12.3 示例
+
+```json
+{
+  "knives": [
+    {
+      "id": "knife-1",
+      "orientation": "v",
+      "length": 2,
+      "edge": 5,
+      "start": 5
+    }
+  ]
+}
+```
+
+表示一把竖直刀具，长度为 2，位于第 5 列边界（列 4 和列 5 之间），覆盖行 5 和行 6。
+
+### 12.4 相关文件
+
+| 文件 | 说明 |
+|---|---|
+| `tile-map/KnifeEdges.ts` | 纯函数：边计算、位置吸附、位置验证 |
+| `tile-map/LevelTypes.ts` | `KnifeData` 类型定义 |
+| `tile-map/LevelLoader.ts` | 刀具数据解析 |
+| `tile-map/BlockRegistry.ts` | `splitDisconnectedBlock()` N-way 通用分裂 |
+| `level/LevelController.ts` | 刀具渲染、拖拽、`useKnife()` |
+
+### 12.5 API
+
+```ts
+// LevelController 公开方法
+useKnife(knifeId: string): boolean
+```
+
+返回 `true` 表示有 block 被分裂。
+
+---
+
+## 13. 验收检查清单
 
 | # | 检查项 | 验证方式 | 状态 |
 |---|---|---|---|

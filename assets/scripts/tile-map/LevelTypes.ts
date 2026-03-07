@@ -38,6 +38,30 @@ export interface TargetBoxData {
   acceptBlockId?: string;
 }
 
+// ──────────────────── 刀具 ────────────────────
+
+/**
+ * 切割刀具：一条对齐到逻辑格边界的线段。
+ *
+ * 坐标含义取决于 orientation：
+ * - `'v'`（竖线）：沿列边界，edge = 列边界索引（1 .. gridCols−1），start = 起始行
+ * - `'h'`（横线）：沿行边界，edge = 行边界索引（1 .. gridRows−1），start = 起始列
+ *
+ * 线段覆盖 [start, start+length) 范围内的逻辑格边。
+ */
+export interface KnifeData {
+  /** 刀具唯一标识符 */
+  id: string;
+  /** 方向：'h' 水平 | 'v' 垂直 */
+  orientation: 'h' | 'v';
+  /** 长度（覆盖的逻辑格边数量，≥ 1） */
+  length: number;
+  /** 边界索引：'v' 时为列边界 (1..gridCols-1)，'h' 时为行边界 (1..gridRows-1) */
+  edge: number;
+  /** 起始位置：'v' 时为起始行，'h' 时为起始列（0-based） */
+  start: number;
+}
+
 // ──────────────────── 关卡 ────────────────────
 
 /**
@@ -64,4 +88,6 @@ export interface LevelData {
   blocks: BlockData[];
   /** 目标盒子列表（可选） */
   targetBoxes?: TargetBoxData[];
+  /** 切割刀具列表（可选） */
+  knives?: KnifeData[];
 }

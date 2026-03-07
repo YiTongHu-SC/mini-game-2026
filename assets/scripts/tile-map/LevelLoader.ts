@@ -13,7 +13,7 @@
  * 零 Cocos 依赖 — 可在 Jest 中直接测试。
  */
 
-import { LevelData, CellCoord, TargetBoxData } from './LevelTypes';
+import { LevelData, CellCoord, TargetBoxData, KnifeData } from './LevelTypes';
 
 // ──────────────────── types ────────────────────
 
@@ -31,6 +31,8 @@ export interface LevelLoadResult {
   targetBoxes: TargetBoxData[];
   /** 目标盒子覆盖的所有逻辑格（去重后） */
   targetCells: CellCoord[];
+  /** 切割刀具列表 */
+  knives: KnifeData[];
 }
 
 // ──────────────────── helpers ────────────────────
@@ -124,6 +126,15 @@ export class LevelLoader {
       return { x, y };
     });
 
+    // 收集刀具数据
+    const knives: KnifeData[] = (data.knives ?? []).map(k => ({
+      id: k.id,
+      orientation: k.orientation,
+      length: k.length,
+      edge: k.edge,
+      start: k.start,
+    }));
+
     return {
       gridCols: data.gridCols,
       gridRows: data.gridRows,
@@ -131,6 +142,7 @@ export class LevelLoader {
       walls,
       targetBoxes,
       targetCells,
+      knives,
     };
   }
 }

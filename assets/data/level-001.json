@@ -45,5 +45,14 @@
         { "x": 5, "y": 1 }
       ]
     }
+  ],
+  "knives": [
+    {
+      "id": "knife-1",
+      "orientation": "v",
+      "length": 1,
+      "edge": 5,
+      "start": 5
+    }
   ]
 }

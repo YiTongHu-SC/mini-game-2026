@@ -304,3 +304,50 @@ describe('LevelLoader — level-001 完整场景', () => {
     expect(wallSet(result.walls)).toContain('2,1|3,1');
   });
 });
+
+// ════════════════════════════════════════════════════════════════
+// 5. 刀具解析
+// ════════════════════════════════════════════════════════════════
+
+describe('LevelLoader — 刀具解析', () => {
+  test('无 knives 字段 → knives 为空数组', () => {
+    const data: LevelData = { gridCols: 4, gridRows: 4, blocks: [] };
+    const result = LevelLoader.load(data);
+    expect(result.knives).toEqual([]);
+  });
+
+  test('解析单个刀具', () => {
+    const data: LevelData = {
+      gridCols: 8,
+      gridRows: 10,
+      blocks: [],
+      knives: [{ id: 'k1', orientation: 'v', length: 3, edge: 2, start: 1 }],
+    };
+    const result = LevelLoader.load(data);
+    expect(result.knives).toHaveLength(1);
+    expect(result.knives[0]).toEqual({
+      id: 'k1',
+      orientation: 'v',
+      length: 3,
+      edge: 2,
+      start: 1,
+    });
+  });
+
+  test('解析多个刀具', () => {
+    const data: LevelData = {
+      gridCols: 8,
+      gridRows: 10,
+      blocks: [],
+      knives: [
+        { id: 'k1', orientation: 'v', length: 2, edge: 3, start: 0 },
+        { id: 'k2', orientation: 'h', length: 4, edge: 5, start: 1 },
+      ],
+    };
+    const result = LevelLoader.load(data);
+    expect(result.knives).toHaveLength(2);
+    expect(result.knives[0].id).toBe('k1');
+    expect(result.knives[1].id).toBe('k2');
+    expect(result.knives[1].orientation).toBe('h');
+  });
+});

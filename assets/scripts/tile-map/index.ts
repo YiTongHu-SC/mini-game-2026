@@ -43,7 +43,7 @@ export type { WallEdge } from './BlockManager';
 
 // ── Level system ──
 
-export type { CellCoord, BlockData, TargetBoxData, LevelData } from './LevelTypes';
+export type { CellCoord, BlockData, TargetBoxData, KnifeData, LevelData } from './LevelTypes';
 
 export { LevelLoader } from './LevelLoader';
 export type { LevelLoadResult } from './LevelLoader';
@@ -51,3 +51,7 @@ export type { LevelLoadResult } from './LevelLoader';
 export { checkTargetBoxConstraint } from './TargetBoxConstraint';
 
 export { BlockRegistry } from './BlockRegistry';
+
+// ── Knife system ──
+
+export { getKnifeEdges, isKnifePositionValid, snapKnifePosition } from './KnifeEdges';
