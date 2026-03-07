@@ -91,7 +91,6 @@ export class LevelSelectController extends Component {
     const total = this.totalPages();
     if (total <= 1) return;
     this.currentPage = (this.currentPage - 1 + total) % total;
-    this.selectedIndex = -1;
     this.rebuildPage();
   }
 
@@ -100,7 +99,6 @@ export class LevelSelectController extends Component {
     const total = this.totalPages();
     if (total <= 1) return;
     this.currentPage = (this.currentPage + 1) % total;
-    this.selectedIndex = -1;
     this.rebuildPage();
   }
 
@@ -156,6 +154,11 @@ export class LevelSelectController extends Component {
     // 更新页码
     if (this.pageLabel) {
       this.pageLabel.string = `${this.currentPage + 1} / ${this.totalPages()}`;
+    }
+    // 若当前页有项且未选中，自动选中第一项
+    if (this.selectedIndex < 0 && this.itemEntries.length > 0) {
+      this.selectItem(this.itemEntries[0].globalIndex);
+      return; // selectItem 已更新 label
     }
     // 更新选中标签
     this.updateSelectedLabel();
