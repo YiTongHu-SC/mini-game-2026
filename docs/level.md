@@ -48,10 +48,17 @@ interface BlockData {
   walls?: [CellCoord, CellCoord][];  // block 内部墙壁（可选），用于保存同 block 内的分割线
 }
 
+interface TargetBoxData {
+  id: string;             // 目标盒子唯一标识符
+  cells: CellCoord[];     // 目标盒子覆盖的逻辑格列表
+  acceptBlockId?: string; // 限制仅允许某个 block 放入（可选）
+}
+
 interface LevelData {
   gridCols: number;   // 逻辑网格总列数
   gridRows: number;   // 逻辑网格总行数
   blocks: BlockData[]; // block 列表（数组顺序无关）
+  targetBoxes?: TargetBoxData[]; // 目标盒子列表（可选）
 }
 ```
 
@@ -77,6 +84,18 @@ interface LevelData {
         { "x": 3, "y": 1 },
         { "x": 3, "y": 2 },
         { "x": 4, "y": 2 }
+      ]
+    }
+  ],
+  "targetBoxes": [
+    {
+      "id": "goal-A",
+      "acceptBlockId": "block-A",
+      "cells": [
+        { "x": 5, "y": 6 },
+        { "x": 6, "y": 6 },
+        { "x": 5, "y": 7 },
+        { "x": 6, "y": 7 }
       ]
     }
   ]

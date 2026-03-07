@@ -13,7 +13,7 @@
  * 零 Cocos 依赖 — 可在 Jest 中直接测试。
  */
 
-import { LevelData, CellCoord } from './LevelTypes';
+import { LevelData, CellCoord, TargetBoxData } from './LevelTypes';
 
 // ──────────────────── types ────────────────────
 
@@ -27,6 +27,10 @@ export interface LevelLoadResult {
   occupiedCells: CellCoord[];
   /** 需要添加的 wall（每条 wall 用两个相邻格坐标表示） */
   walls: [CellCoord, CellCoord][];
+  /** 目标盒子列表（原始结构，便于运行时匹配） */
+  targetBoxes: TargetBoxData[];
+  /** 目标盒子覆盖的所有逻辑格（去重后） */
+  targetCells: CellCoord[];
 }
 
 // ──────────────────── helpers ────────────────────
@@ -103,11 +107,30 @@ export class LevelLoader {
       }
     }
 
+    // 收集目标盒子数据
+    const targetBoxes = (data.targetBoxes ?? []).map(tb => ({
+      id: tb.id,
+      acceptBlockId: tb.acceptBlockId,
+      cells: tb.cells.map(c => ({ x: c.x, y: c.y })),
+    }));
+    const targetCellSet = new Set<string>();
+    for (const tb of targetBoxes) {
+      for (const c of tb.cells) {
+        targetCellSet.add(`${c.x},${c.y}`);
+      }
+    }
+    const targetCells: CellCoord[] = [...targetCellSet].map(key => {
+      const [x, y] = key.split(',').map(Number);
+      return { x, y };
+    });
+
     return {
       gridCols: data.gridCols,
       gridRows: data.gridRows,
       occupiedCells,
       walls,
+      targetBoxes,
+      targetCells,
     };
   }
 }

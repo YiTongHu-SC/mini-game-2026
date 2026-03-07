@@ -28,6 +28,16 @@ export interface BlockData {
   walls?: [CellCoord, CellCoord][];
 }
 
+/** 一个目标盒子区域：可用于判定 block 是否放置到目标位 */
+export interface TargetBoxData {
+  /** 目标盒子唯一标识符 */
+  id: string;
+  /** 目标盒子覆盖的逻辑格坐标列表 */
+  cells: CellCoord[];
+  /** 仅允许指定 block 放入（可选） */
+  acceptBlockId?: string;
+}
+
 // ──────────────────── 关卡 ────────────────────
 
 /**
@@ -52,4 +62,6 @@ export interface LevelData {
   gridRows: number;
   /** block 列表 */
   blocks: BlockData[];
+  /** 目标盒子列表（可选） */
+  targetBoxes?: TargetBoxData[];
 }

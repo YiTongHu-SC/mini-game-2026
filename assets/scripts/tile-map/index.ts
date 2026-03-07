@@ -43,7 +43,7 @@ export type { WallEdge } from './BlockManager';
 
 // ── Level system ──
 
-export type { CellCoord, BlockData, LevelData } from './LevelTypes';
+export type { CellCoord, BlockData, TargetBoxData, LevelData } from './LevelTypes';
 
 export { LevelLoader } from './LevelLoader';
 export type { LevelLoadResult } from './LevelLoader';

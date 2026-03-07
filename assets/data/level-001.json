@@ -17,5 +17,24 @@
         { "x": 3, "y": 2 }
       ]
     }
+  ],
+  "targetBoxes": [
+    {
+      "id": "goal-A",
+      "acceptBlockId": "block-A",
+      "cells": [
+        { "x": 5, "y": 6 },
+        { "x": 6, "y": 6 },
+        { "x": 6, "y": 7 }
+      ]
+    },
+    {
+      "id": "goal-B",
+      "acceptBlockId": "block-B",
+      "cells": [
+        { "x": 2, "y": 7 },
+        { "x": 2, "y": 8 }
+      ]
+    }
   ]
 }

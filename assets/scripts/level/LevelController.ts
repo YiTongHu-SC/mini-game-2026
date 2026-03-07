@@ -41,7 +41,7 @@ import { DualGridMapper } from '../tile-map/DualGridMapper';
 import { BlockManager } from '../tile-map/BlockManager';
 import { STRIDE, visualGridSize } from '../tile-map/DualGridTypes';
 import { LevelLoader } from '../tile-map/LevelLoader';
-import { LevelData, CellCoord } from '../tile-map/LevelTypes';
+import { LevelData, CellCoord, TargetBoxData } from '../tile-map/LevelTypes';
 import { BlockRegistry } from '../tile-map/BlockRegistry';
 
 const { ccclass, property } = _decorator;
@@ -69,6 +69,13 @@ interface DragState {
   startMouseLocal: { x: number; y: number };
   /** 被拖拽的表现格节点及其原始位置 */
   draggedNodes: { node: Node; origX: number; origY: number }[];
+}
+
+interface TargetBoxRuntime {
+  id: string;
+  acceptBlockId?: string;
+  cells: CellCoord[];
+  cellKeySet: Set<string>;
 }
 
 /** Fallback layer value for UI_2D (1 << 25). */
@@ -137,6 +144,12 @@ export class LevelController extends Component {
   private mapper!: DualGridMapper;
   private resolver!: AutoTileResolver;
   private renderer!: VisualTilemapRenderer;
+  private targetLogicGrid!: OccupancyGrid;
+  private targetVisualGrid!: OccupancyGrid;
+  private targetMapper!: DualGridMapper;
+  private targetResolver!: AutoTileResolver;
+  private targetRenderer!: VisualTilemapRenderer;
+  private targetLayer!: Node;
   private blockManager!: BlockManager;
 
   private logicCols: number = 0;
@@ -146,6 +159,8 @@ export class LevelController extends Component {
   private overlayCells: (Node | null)[][] = [];
   private wallIndicatorLayer!: Node;
   private wallIndicators: Map<string, Node> = new Map();
+  private targetBoxes: TargetBoxRuntime[] = [];
+  private blockToTarget: Map<string, string> = new Map();
 
   // ── Drag & Drop ──
   private blockRegistry!: BlockRegistry;
@@ -175,7 +190,8 @@ export class LevelController extends Component {
       `[LevelController] Loading level: ${this.logicCols}×${this.logicRows}, ` +
         `blocks=${rawData.blocks.length}, ` +
         `occupiedCells=${loadResult.occupiedCells.length}, ` +
-        `walls=${loadResult.walls.length}`,
+        `walls=${loadResult.walls.length}, ` +
+        `targets=${loadResult.targetBoxes.length}`,
     );
 
     // 3. Logic grid
@@ -184,6 +200,8 @@ export class LevelController extends Component {
     // 4. Visual grid (derived size)
     const vSize = visualGridSize(this.logicCols, this.logicRows);
     this.visualGrid = new OccupancyGrid(vSize.cols, vSize.rows);
+    this.targetLogicGrid = new OccupancyGrid(this.logicCols, this.logicRows);
+    this.targetVisualGrid = new OccupancyGrid(vSize.cols, vSize.rows);
 
     // 5. Mapper (logic → visual coordination)
     this.mapper = new DualGridMapper(this.logicCols, this.logicRows);
@@ -194,6 +212,8 @@ export class LevelController extends Component {
 
     // 7. Resolver works on the VISUAL grid
     this.resolver = new AutoTileResolver(this.visualGrid, createDefaultConfig());
+    this.targetMapper = new DualGridMapper(this.logicCols, this.logicRows, 'or');
+    this.targetResolver = new AutoTileResolver(this.targetVisualGrid, createDefaultConfig());
 
     // 8. Renderer for the visual grid
     this.renderer = new VisualTilemapRenderer(
@@ -203,6 +223,20 @@ export class LevelController extends Component {
       this.visualTileSize,
       this.tileFrames,
       this.showDebugMask,
+    );
+
+    this.targetLayer = new Node('TargetVisualLayer');
+    this.targetLayer.layer = this.node.layer || Layers?.Enum?.UI_2D || UI_2D_LAYER;
+    this.targetLayer.parent = this.node;
+    this.targetLayer.setPosition(Vec3.ZERO);
+    this.targetLayer.setSiblingIndex(0);
+    this.targetRenderer = new VisualTilemapRenderer(
+      this.targetLayer,
+      vSize.cols,
+      vSize.rows,
+      this.visualTileSize,
+      this.tileFrames,
+      false,
     );
 
     // 9. Resize parent UITransform to cover the full visual grid
@@ -234,6 +268,9 @@ export class LevelController extends Component {
     this._pendingRefresh--;
     if (this._pendingRefresh === 0) {
       // 延迟刷新：等 Cocos 渲染管线注册完动态节点后再刷新
+      this.targetMapper.syncAll(this.targetLogicGrid, this.targetVisualGrid);
+      this.targetRenderer.refreshAll(this.targetResolver, this.targetVisualGrid);
+      this.refreshTargetHighlight();
       this.mapper.syncAll(this.logicGrid, this.visualGrid);
       this.renderer.refreshAll(this.resolver, this.visualGrid);
       if (this.showLogicOverlay) this.refreshAllOverlay();
@@ -443,6 +480,8 @@ export class LevelController extends Component {
         this.logicGrid.getDirtyAndClear();
         this.mapper.syncAll(this.logicGrid, this.visualGrid);
         this.renderer.refreshAll(this.resolver, this.visualGrid);
+        this.recomputeTargetAssignments();
+        this.refreshTargetHighlight();
 
         // 重建 wall 指示器
         this.clearAllWallIndicators();
@@ -494,10 +533,81 @@ export class LevelController extends Component {
       this.addWallIndicator(a, b);
     }
 
+    this.targetBoxes = this.buildTargetRuntime(loadResult.targetBoxes);
+    for (const cell of loadResult.targetCells) {
+      this.targetLogicGrid.setCell(cell.x, cell.y, 1);
+    }
+    this.targetLogicGrid.getDirtyAndClear();
+    this.recomputeTargetAssignments();
+
     // 同步逻辑网格到表现网格（全量）
+    this.targetMapper.syncAll(this.targetLogicGrid, this.targetVisualGrid);
+    this.targetRenderer.refreshAll(this.targetResolver, this.targetVisualGrid);
+    this.refreshTargetHighlight();
     this.mapper.syncAll(this.logicGrid, this.visualGrid);
 
     // 刷新由 update() 延迟执行（给 Cocos 注册动态节点的时间）
+  }
+
+  private buildTargetRuntime(source: TargetBoxData[]): TargetBoxRuntime[] {
+    const result: TargetBoxRuntime[] = [];
+    for (const tb of source) {
+      const cells = tb.cells.map(c => ({ x: c.x, y: c.y }));
+      result.push({
+        id: tb.id,
+        acceptBlockId: tb.acceptBlockId,
+        cells,
+        cellKeySet: new Set(cells.map(c => `${c.x},${c.y}`)),
+      });
+    }
+    return result;
+  }
+
+  private findMatchedTargetId(blockId: string): string | null {
+    const blockCells = this.blockRegistry.getBlockCells(blockId);
+    if (blockCells.length === 0) return null;
+    const blockSet = new Set(blockCells.map(c => `${c.x},${c.y}`));
+
+    for (const tb of this.targetBoxes) {
+      if (tb.acceptBlockId && tb.acceptBlockId !== blockId) continue;
+      if (tb.cells.length !== blockCells.length) continue;
+      let same = true;
+      for (const key of blockSet) {
+        if (!tb.cellKeySet.has(key)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return tb.id;
+    }
+    return null;
+  }
+
+  private recomputeTargetAssignments(): void {
+    this.blockToTarget.clear();
+    const usedTargetIds = new Set<string>();
+    for (const blockId of this.blockRegistry.getAllBlockIds()) {
+      const targetId = this.findMatchedTargetId(blockId);
+      if (targetId && !usedTargetIds.has(targetId)) {
+        usedTargetIds.add(targetId);
+        this.blockToTarget.set(blockId, targetId);
+      }
+    }
+  }
+
+  private refreshTargetHighlight(): void {
+    const matchedTargets = new Set<string>(this.blockToTarget.values());
+    const colorIdle = new Color(120, 170, 255, 120);
+    const colorDone = new Color(120, 255, 160, 140);
+
+    for (const tb of this.targetBoxes) {
+      const tint = matchedTargets.has(tb.id) ? colorDone : colorIdle;
+      for (const cell of tb.cells) {
+        for (const vc of this.targetMapper.getAffectedVisualCells(cell.x, cell.y)) {
+          this.targetRenderer.setCellTint(vc.x, vc.y, tint);
+        }
+      }
+    }
   }
 
   // ──────────────────── logic overlay ────────────────────
@@ -748,6 +858,7 @@ export class LevelController extends Component {
    */
   private commitDrop(state: DragState, dx: number, dy: number): void {
     const { blockId, originalCells } = state;
+    const previousTargetId = this.blockToTarget.get(blockId) ?? null;
 
     // 从逻辑网格移除原格子
     for (const cell of originalCells) {
@@ -773,6 +884,8 @@ export class LevelController extends Component {
     this.logicGrid.getDirtyAndClear();
     this.mapper.syncAll(this.logicGrid, this.visualGrid);
     this.renderer.refreshAll(this.resolver, this.visualGrid);
+    this.recomputeTargetAssignments();
+    this.refreshTargetHighlight();
 
     // 重建 wall 指示器
     this.clearAllWallIndicators();
@@ -781,6 +894,17 @@ export class LevelController extends Component {
     }
 
     if (this.showLogicOverlay) this.refreshAllOverlay();
+
+    const currentTargetId = this.blockToTarget.get(blockId) ?? null;
+    if (previousTargetId !== currentTargetId) {
+      if (currentTargetId) {
+        console.log(`[LevelController] Block '${blockId}' placed into target '${currentTargetId}'`);
+      } else if (previousTargetId) {
+        console.log(
+          `[LevelController] Block '${blockId}' moved out of target '${previousTargetId}'`,
+        );
+      }
+    }
 
     console.log(`[LevelController] Block '${blockId}' committed at delta (${dx},${dy})`);
   }

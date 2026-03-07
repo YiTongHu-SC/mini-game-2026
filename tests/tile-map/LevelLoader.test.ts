@@ -30,6 +30,8 @@ describe('LevelLoader — 基础解析', () => {
     expect(result.gridRows).toBe(4);
     expect(result.occupiedCells).toHaveLength(0);
     expect(result.walls).toHaveLength(0);
+    expect(result.targetBoxes).toHaveLength(0);
+    expect(result.targetCells).toHaveLength(0);
   });
 
   test('单个 block 单格 → 一个格子、无 wall', () => {
@@ -70,6 +72,48 @@ describe('LevelLoader — 基础解析', () => {
     const result = LevelLoader.load(data);
     expect(result.gridCols).toBe(10);
     expect(result.gridRows).toBe(8);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// 4. 目标盒子解析
+// ════════════════════════════════════════════════════════════════
+
+describe('LevelLoader — targetBoxes 解析', () => {
+  test('保留 targetBoxes 并展开 targetCells（去重）', () => {
+    const data: LevelData = {
+      gridCols: 8,
+      gridRows: 8,
+      blocks: [],
+      targetBoxes: [
+        {
+          id: 'goal-A',
+          acceptBlockId: 'block-A',
+          cells: [
+            { x: 1, y: 1 },
+            { x: 2, y: 1 },
+          ],
+        },
+        {
+          id: 'goal-B',
+          cells: [
+            { x: 2, y: 1 },
+            { x: 2, y: 2 },
+          ],
+        },
+      ],
+    };
+
+    const result = LevelLoader.load(data);
+    expect(result.targetBoxes).toHaveLength(2);
+    expect(result.targetBoxes[0].id).toBe('goal-A');
+    expect(result.targetBoxes[0].acceptBlockId).toBe('block-A');
+
+    const targetSet = cellSet(result.targetCells);
+    expect(targetSet.size).toBe(3);
+    expect(targetSet).toContain('1,1');
+    expect(targetSet).toContain('2,1');
+    expect(targetSet).toContain('2,2');
   });
 });
 
