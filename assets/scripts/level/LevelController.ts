@@ -43,6 +43,7 @@ import { STRIDE, visualGridSize } from '../tile-map/DualGridTypes';
 import { LevelLoader } from '../tile-map/LevelLoader';
 import { LevelData, CellCoord, TargetBoxData } from '../tile-map/LevelTypes';
 import { BlockRegistry } from '../tile-map/BlockRegistry';
+import { checkTargetBoxConstraint } from '../tile-map/TargetBoxConstraint';
 
 const { ccclass, property } = _decorator;
 
@@ -77,6 +78,9 @@ interface TargetBoxRuntime {
   cells: CellCoord[];
   cellKeySet: Set<string>;
 }
+
+/** All target-box cell keys (union), used for fast overlap check. */
+type AllTargetCellKeys = Set<string>;
 
 /** Fallback layer value for UI_2D (1 << 25). */
 const UI_2D_LAYER = 1 << 25;
@@ -160,6 +164,7 @@ export class LevelController extends Component {
   private wallIndicatorLayer!: Node;
   private wallIndicators: Map<string, Node> = new Map();
   private targetBoxes: TargetBoxRuntime[] = [];
+  private allTargetCellKeys: Set<string> = new Set();
   private blockToTarget: Map<string, string> = new Map();
 
   // ── Drag & Drop ──
@@ -534,6 +539,7 @@ export class LevelController extends Component {
     }
 
     this.targetBoxes = this.buildTargetRuntime(loadResult.targetBoxes);
+    this.allTargetCellKeys = new Set(loadResult.targetCells.map(c => `${c.x},${c.y}`));
     for (const cell of loadResult.targetCells) {
       this.targetLogicGrid.setCell(cell.x, cell.y, 1);
     }
@@ -807,6 +813,7 @@ export class LevelController extends Component {
    */
   private isPlacementValid(cells: CellCoord[], dx: number, dy: number): boolean {
     const blockId = this.dragState?.blockId;
+    const newKeys: string[] = [];
     for (const cell of cells) {
       const nx = cell.x + dx;
       const ny = cell.y + dy;
@@ -815,8 +822,14 @@ export class LevelController extends Component {
         // 目标格有占用 — 若属于被拖拽的 block 本身则允许（dx=0,dy=0 的情况）
         if (this.blockRegistry.getBlockIdAt(nx, ny) !== blockId) return false;
       }
+      newKeys.push(`${nx},${ny}`);
     }
-    return true;
+    // 目标盒子边界约束：完全在某个盒子内 或 完全在盒子外
+    return checkTargetBoxConstraint(
+      newKeys,
+      this.targetBoxes.map(tb => tb.cellKeySet),
+      this.allTargetCellKeys,
+    );
   }
 
   /**

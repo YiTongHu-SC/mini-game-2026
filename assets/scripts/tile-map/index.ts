@@ -48,4 +48,6 @@ export type { CellCoord, BlockData, TargetBoxData, LevelData } from './LevelType
 export { LevelLoader } from './LevelLoader';
 export type { LevelLoadResult } from './LevelLoader';
 
+export { checkTargetBoxConstraint } from './TargetBoxConstraint';
+
 export { BlockRegistry } from './BlockRegistry';

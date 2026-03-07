@@ -197,6 +197,7 @@ block-B 格子：(3,1), (3,2), (4,2)
 **关系说明**：
 
 - `LevelLoader` / `LevelTypes`：零 Cocos 依赖，可在 Jest 中直接测试
+- `TargetBoxConstraint`：零 Cocos 依赖；负责判定 block 落点与目标盒子的边界关系（完全在内 / 完全在外 / 部分重叠）
 - `BlockRegistry`：零 Cocos 依赖；在 `start()` 中与 `LevelLoader` 一同初始化，维护拖拽期间的 block→cell 映射
 - `LevelController`：Cocos `@ccclass` 组件，复用全部现有双网格系统类，不继承 `DualGridController`
 - 关卡 JSON 通过 Cocos `JsonAsset` 属性引用，在 Inspector 中绑定
@@ -374,6 +375,12 @@ return null   ← 无有效位置
 
 - 所有目标格在网格范围内
 - 目标格为空 **或** 属于被拖拽的 block 本身（dx=0/dy=0 原位情形）
+- 目标盒子边界约束（`checkTargetBoxConstraint`）：
+  - block **完全在某一个目标盒子内** → 有效
+  - block **完全在所有目标盒子外** → 有效
+  - block 与目标盒子 **部分重叠**（含跨两个盒子）→ 无效
+
+当吸附点本身违反目标盒子边界约束时，`findValidPlacement()` 会继续按曼哈顿距离从近到远搜索，返回最近的其他有效落点；若搜索窗口（±2）内不存在有效位置，则本次拖拽取消并回原位。
 
 ### 7.4 提交流程
 
