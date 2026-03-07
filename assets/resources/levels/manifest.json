@@ -1,6 +1,14 @@
 {
   "levels": [
     { "id": "001", "name": "关卡 1", "path": "levels/level-001" },
-    { "id": "002", "name": "关卡 2", "path": "levels/level-002" }
+    { "id": "002", "name": "关卡 2", "path": "levels/level-002" },
+    { "id": "003", "name": "关卡 3", "path": "levels/level-003" },
+    { "id": "004", "name": "关卡 4", "path": "levels/level-004" },
+    { "id": "005", "name": "关卡 5", "path": "levels/level-005" },
+    { "id": "006", "name": "关卡 6", "path": "levels/level-006" },
+    { "id": "007", "name": "关卡 7", "path": "levels/level-007" },
+    { "id": "008", "name": "关卡 8", "path": "levels/level-008" },
+    { "id": "009", "name": "关卡 9", "path": "levels/level-009" },
+    { "id": "010", "name": "关卡 10", "path": "levels/level-010" }
   ]
 }

@@ -699,7 +699,7 @@ useKnife(knifeId: string): boolean
 
 ### 9.1 概述
 
-支持多关卡动态加载：关卡选择场景（`levelSelect.scene`）左右翻页浏览所有关卡，点击"开始"进入游戏场景并加载对应关卡数据。
+支持多关卡动态加载：关卡选择场景（`levelSelect.scene`）以 **2×3 网格**分页展示关卡列表，前后翻页浏览。点击关卡项选中后点"开始"进入游戏场景并加载对应关卡数据。每个关卡项显示**编号 + 名称**。
 
 ### 9.2 目录结构
 
@@ -749,27 +749,45 @@ levelSelect.scene                     level.scene
 │ LevelSelectController│  ──Start──▶ │ LevelController              │
 │                     │              │                              │
 │ 加载 manifest.json   │              │ if LevelConfig.currentLevel  │
-│ 左右翻页选择关卡       │              │   → resources.load()         │
-│ 点击"开始"设置         │              │ else                         │
-│   LevelConfig.path   │              │   → Inspector fallback       │
-│ director.loadScene   │              │                              │
-│   ('level')          │  ◀──Back──  │ goBack()                      │
-└─────────────────────┘              │   director.loadScene          │
-                                     │     ('levelSelect')           │
+│ 2×3 网格分页展示关卡   │              │   → resources.load()         │
+│ 前后翻页浏览           │              │ else                         │
+│                     │              │   → Inspector fallback       │
+│ 点击关卡项 → 选中高亮  │              │                              │
+│ 点击"开始" → 设置      │              │                              │
+│   LevelConfig.path   │              │                              │
+│ director.loadScene   │  ◀──Back──  │ goBack()                      │
+│   ('level')          │              │   director.loadScene          │
+└─────────────────────┘              │     ('levelSelect')           │
                                      └──────────────────────────────┘
 ```
 
-### 9.6 新增关卡步骤
+### 9.6 分页参数
+
+| 参数 | 值 | 说明 |
+|------|---|------|
+| `PAGE_COLS` | 2 | 每页列数 |
+| `PAGE_ROWS` | 3 | 每页行数 |
+| `PER_PAGE` | 6 | 每页最多关卡数 |
+| `GAP` | 12 px | 关卡项之间的间距 |
+| 关卡项尺寸 | 动态计算 | 根据 `levelGrid` 节点的 UITransform 宽高和列/行数推算 |
+| 最后一页 | 可能不满 6 项 | 正常显示，空位留白 |
+
+关卡项显示内容：`{id}  {name}`（如 "001  关卡 1"），`fontSize=22`。
+选中态背景色 `(50, 180, 80, 220)`，默认态 `(80, 80, 80, 200)`。
+
+### 9.7 新增关卡步骤
 
 1. 在 `assets/resources/levels/` 下新建 `level-XXX.json`，格式同 §2
 2. 在 `manifest.json` 的 `levels` 数组中追加条目
 3. 在 Cocos Creator 中刷新资源面板
 
-### 9.7 levelSelect 场景搭建（Cocos Creator 编辑器）
+### 9.8 levelSelect 场景搭建（Cocos Creator 编辑器）
 
 1. 新建场景 `levelSelect.scene`
-2. 创建空节点挂载 `LevelSelectController` 脚本组件
-3. 添加 Label 节点并绑定 `levelNameLabel`（关卡名）和 `levelIndexLabel`（页码）
-4. 添加 3 个 Button 节点：上一关、下一关、开始
-5. 各 Button 的 Click Events 绑定到 `onClickPrev`、`onClickNext`、`onClickStart`
-6. （可选）在 level.scene 中添加"返回"按钮绑定 `LevelController.goBack()`
+2. 创建空节点，挂载 `LevelSelectController` 脚本组件
+3. 创建关卡容器节点 `LevelGrid`，设置 `UITransform` 宽高（如 400×480），绑定到 `levelGrid` 属性
+4. 添加 Label 节点绑定 `pageLabel`（页码，如 "1 / 3"）
+5. 添加 Label 节点绑定 `selectedLabel`（当前选中关卡名称）
+6. 添加 3 个 Button 节点：上一页、下一页、开始
+7. 各 Button 的 Click Events 绑定到 `onClickPrev`、`onClickNext`、`onClickStart`
+8. （可选）在 level.scene 中添加"返回"按钮绑定 `LevelController.goBack()`
