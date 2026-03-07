@@ -1,0 +1,6 @@
+{
+  "levels": [
+    { "id": "001", "name": "关卡 1", "path": "levels/level-001" },
+    { "id": "002", "name": "关卡 2", "path": "levels/level-002" }
+  ]
+}

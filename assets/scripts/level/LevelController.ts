@@ -32,6 +32,8 @@ import {
   input,
   Input,
   assetManager,
+  resources,
+  director,
 } from 'cc';
 import { EDITOR } from 'cc/env';
 import { OccupancyGrid } from '../tile-map/OccupancyGrid';
@@ -46,6 +48,7 @@ import { LevelData, CellCoord, TargetBoxData, KnifeData } from '../tile-map/Leve
 import { BlockRegistry } from '../tile-map/BlockRegistry';
 import { checkTargetBoxConstraint } from '../tile-map/TargetBoxConstraint';
 import { getKnifeEdges, snapKnifePosition } from '../tile-map/KnifeEdges';
+import { LevelConfig } from './LevelConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -212,14 +215,33 @@ export class LevelController extends Component {
   // ──────────────────── lifecycle ────────────────────
 
   start(): void {
-    // 1. 验证关卡数据
+    // 动态加载：若 LevelConfig 指定了关卡路径，从 resources/ 加载
+    if (LevelConfig.currentLevelPath) {
+      const path = LevelConfig.currentLevelPath;
+      console.log(`[LevelController] Dynamic loading: ${path}`);
+      resources.load(path, JsonAsset, (err, asset) => {
+        if (err || !asset || !asset.json) {
+          console.error(`[LevelController] Failed to load level: ${path}`, err);
+          return;
+        }
+        this.initLevel(asset.json as LevelData);
+      });
+      return;
+    }
+
+    // 回退：使用 Inspector 绑定的 levelData
     if (!this.levelData || !this.levelData.json) {
       console.error('[LevelController] levelData is not set or invalid!');
       return;
     }
+    this.initLevel(this.levelData.json as LevelData);
+  }
 
-    // 2. 解析关卡 JSON
-    const rawData = this.levelData.json as LevelData;
+  /**
+   * 用关卡数据初始化全部运行时系统。
+   * 由 start() 调用（同步或异步回调中）。
+   */
+  private initLevel(rawData: LevelData): void {
     const loadResult = LevelLoader.load(rawData);
     this.blockRegistry = new BlockRegistry(rawData);
 
@@ -1246,6 +1268,11 @@ export class LevelController extends Component {
     }
 
     return anySplit;
+  }
+
+  /** 返回选关场景。可绑定到 UI 按钮。 */
+  goBack(): void {
+    director.loadScene('levelSelect');
   }
 
   onDestroy(): void {

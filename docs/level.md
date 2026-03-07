@@ -692,3 +692,84 @@ useKnife(knifeId: string): boolean
 | 13 | 右键 edge 仍可切换墙壁（拖拽时不触发） | 分别测试两种操作 | ⬜ |
 | 14 | 右键同 block 内部 edge 添加墙壁 → 墙壁存储在 block 中；不连通时分裂 | 场景运行 + 观察 wall 指示器变化 | ⬜ |
 | 15 | 现有场景（dualGridTest、tiledMapTest）不受影响 | 分别运行旧场景 | ⬜ |
+
+---
+
+## 9. 多关卡加载
+
+### 9.1 概述
+
+支持多关卡动态加载：关卡选择场景（`levelSelect.scene`）左右翻页浏览所有关卡，点击"开始"进入游戏场景并加载对应关卡数据。
+
+### 9.2 目录结构
+
+```
+assets/
+  resources/
+    levels/
+      manifest.json        # 关卡列表元数据
+      level-001.json       # 关卡 1 数据
+      level-002.json       # 关卡 2 数据
+      ...
+  scripts/
+    level/
+      LevelConfig.ts       # 跨场景静态状态（选中关卡路径 + manifest 缓存）
+      LevelSelectController.ts  # levelSelect 场景主控
+      LevelController.ts   # level 场景主控（已支持动态加载）
+```
+
+### 9.3 manifest.json 格式
+
+```json
+{
+  "levels": [
+    { "id": "001", "name": "关卡 1", "path": "levels/level-001" },
+    { "id": "002", "name": "关卡 2", "path": "levels/level-002" }
+  ]
+}
+```
+
+- `path` 为 `resources/` 下的相对路径（不含扩展名），供 `resources.load()` 使用。
+- 新增关卡时只需添加 JSON 文件并在 manifest 中追加条目。
+
+### 9.4 跨场景状态传递
+
+`LevelConfig` 采用静态属性在场景之间传递数据：
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `currentLevelPath` | `string \| null` | 选中关卡的 resources 路径；null 时回退到 Inspector 绑定 |
+| `manifest` | `LevelMeta[]` | 缓存的关卡列表，避免重复加载 |
+
+### 9.5 场景流程
+
+```
+levelSelect.scene                     level.scene
+┌─────────────────────┐              ┌──────────────────────────────┐
+│ LevelSelectController│  ──Start──▶ │ LevelController              │
+│                     │              │                              │
+│ 加载 manifest.json   │              │ if LevelConfig.currentLevel  │
+│ 左右翻页选择关卡       │              │   → resources.load()         │
+│ 点击"开始"设置         │              │ else                         │
+│   LevelConfig.path   │              │   → Inspector fallback       │
+│ director.loadScene   │              │                              │
+│   ('level')          │  ◀──Back──  │ goBack()                      │
+└─────────────────────┘              │   director.loadScene          │
+                                     │     ('levelSelect')           │
+                                     └──────────────────────────────┘
+```
+
+### 9.6 新增关卡步骤
+
+1. 在 `assets/resources/levels/` 下新建 `level-XXX.json`，格式同 §2
+2. 在 `manifest.json` 的 `levels` 数组中追加条目
+3. 在 Cocos Creator 中刷新资源面板
+
+### 9.7 levelSelect 场景搭建（Cocos Creator 编辑器）
+
+1. 新建场景 `levelSelect.scene`
+2. 创建空节点挂载 `LevelSelectController` 脚本组件
+3. 添加 Label 节点并绑定 `levelNameLabel`（关卡名）和 `levelIndexLabel`（页码）
+4. 添加 3 个 Button 节点：上一关、下一关、开始
+5. 各 Button 的 Click Events 绑定到 `onClickPrev`、`onClickNext`、`onClickStart`
+6. （可选）在 level.scene 中添加"返回"按钮绑定 `LevelController.goBack()`
