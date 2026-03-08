@@ -8,7 +8,8 @@
  *   4. 同步操作 — 全量同步 / 局部同步
  *
  * 每个逻辑格对应 3×3 表现格，相邻逻辑格之间不共享边界。
- * 墙壁通过将边界行/列的表现格清零来实现视觉断开。
+ * 墙壁通过 AutoTileResolver 的 neighborFilter 在 bitmask 层面断开，
+ * 不修改表现格的占用值（所有被占据逻辑格的 9 个表现格始终为 1）。
  *
  * 零 Cocos 依赖 — 可在 Jest 中直接测试。
  */
@@ -59,46 +60,36 @@ export class DualGridMapper {
   /**
    * 计算单个表现格的占用状态。
    *
-   * 基本规则：表现格跟随其所属逻辑格的状态。
+   * 表现格直接跟随其所属逻辑格的状态：
+   *   - 逻辑格 occupied → 9 个表现格全部为 1
+   *   - 逻辑格 empty → 9 个表现格全部为 0
    *
-   * 墙壁感知（需 setBlockManager）：
-   *   边界表现格（rx=0/2 或 ry=0/2）在对应方向有墙时被清零。
-   *   - rx==0 且左侧有墙 (lx-1,ly)↔(lx,ly) → 0
-   *   - rx==2 且右侧有墙 (lx,ly)↔(lx+1,ly) → 0
-   *   - ry==0 且下方有墙 (lx,ly-1)↔(lx,ly) → 0
-   *   - ry==2 且上方有墙 (lx,ly)↔(lx+1,ly) → 0（实为 (lx,ly)↔(lx,ly+1)）
-   *
-   * 角落格（rx∈{0,2} 且 ry∈{0,2}）在任一相邻方向有墙即清零。
+   * 墙壁不影响占用值。墙壁的视觉效果通过 AutoTileResolver 的
+   * neighborFilter 在 bitmask 计算阶段实现（使跨墙邻居不计入 mask）。
    */
   computeVisualOccupancy(vx: number, vy: number, logicGrid: OccupancyGrid): 0 | 1 {
     const lx = Math.floor(vx / STRIDE);
     const ly = Math.floor(vy / STRIDE);
+    return logicGrid.getCell(lx, ly) === 0 ? 0 : 1;
+  }
 
-    if (logicGrid.getCell(lx, ly) === 0) return 0;
-
-    if (this.blockManager) {
-      const rx = vx % STRIDE; // 0, 1, 2
-      const ry = vy % STRIDE; // 0, 1, 2
-
-      // Left border column
-      if (rx === 0 && this.blockManager.hasWall({ x: lx - 1, y: ly }, { x: lx, y: ly })) {
-        return 0;
-      }
-      // Right border column
-      if (rx === 2 && this.blockManager.hasWall({ x: lx, y: ly }, { x: lx + 1, y: ly })) {
-        return 0;
-      }
-      // Bottom border row
-      if (ry === 0 && this.blockManager.hasWall({ x: lx, y: ly - 1 }, { x: lx, y: ly })) {
-        return 0;
-      }
-      // Top border row
-      if (ry === 2 && this.blockManager.hasWall({ x: lx, y: ly }, { x: lx, y: ly + 1 })) {
-        return 0;
-      }
-    }
-
-    return 1;
+  /**
+   * 创建一个 neighbor filter 供 AutoTileResolver 使用。
+   *
+   * 当两个表现格分属不同逻辑格且之间有墙时，返回 false，
+   * 使 autotile bitmask 不将跨墙邻居计为已占用，从而在墙壁处
+   * 产生 autotile 边缘（而非空缺格）。
+   */
+  createNeighborFilter(): (x: number, y: number, nx: number, ny: number) => boolean {
+    return (x: number, y: number, nx: number, ny: number): boolean => {
+      if (!this.blockManager) return true;
+      const lx = Math.floor(x / STRIDE);
+      const ly = Math.floor(y / STRIDE);
+      const nlx = Math.floor(nx / STRIDE);
+      const nly = Math.floor(ny / STRIDE);
+      if (lx === nlx && ly === nly) return true;
+      return !this.blockManager.hasWall({ x: lx, y: ly }, { x: nlx, y: nly });
+    };
   }
 
   // ──────────────────── affected cells ────────────────────
@@ -204,21 +195,18 @@ export class DualGridMapper {
   }
 
   /**
-   * 局部同步：当墙壁 (a, b) 变化后，更新受影响的表现格。
-   * 返回 visualGrid 产生的脏格列表，可直接传给 renderer.refreshLocal()。
+   * 局部同步：当墙壁 (a, b) 变化后，返回需要刷新 bitmask 的表现格。
+   *
+   * 墙壁不改变占用值（均为 1），但影响 autotile bitmask（通过 neighborFilter）。
+   * 因此直接返回受影响的 6 个边界格，供 renderer.refreshLocal() 重新 resolve。
    */
   syncWallChange(
     a: GridCoord,
     b: GridCoord,
-    logicGrid: OccupancyGrid,
-    visualGrid: OccupancyGrid,
+    _logicGrid: OccupancyGrid,
+    _visualGrid: OccupancyGrid,
   ): GridCoord[] {
-    const affected = this.getAffectedVisualCellsForWall(a, b);
-    for (const { x, y } of affected) {
-      const occ = this.computeVisualOccupancy(x, y, logicGrid);
-      visualGrid.setCell(x, y, occ);
-    }
-    return visualGrid.getDirtyAndClear();
+    return this.getAffectedVisualCellsForWall(a, b);
   }
 
   // ──────────────────── private ────────────────────

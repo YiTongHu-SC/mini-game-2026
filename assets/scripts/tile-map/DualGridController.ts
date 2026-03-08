@@ -93,6 +93,7 @@ export class DualGridController extends Component {
 
     // 4. Resolver works on the VISUAL grid
     this.resolver = new AutoTileResolver(this.visualGrid, createDefaultConfig());
+    this.resolver.setNeighborFilter(this.mapper.createNeighborFilter());
 
     // 5. Renderer for the visual grid
     this.renderer = new VisualTilemapRenderer(

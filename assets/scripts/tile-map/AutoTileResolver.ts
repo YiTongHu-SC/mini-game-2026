@@ -17,9 +17,12 @@ export interface ResolveResult {
   tileIndex: number;
 }
 
+export type NeighborFilter = (x: number, y: number, nx: number, ny: number) => boolean;
+
 export class AutoTileResolver {
   private grid: OccupancyGrid;
   private config: TileMapConfig;
+  private neighborFilter: NeighborFilter | null = null;
 
   constructor(grid: OccupancyGrid, config?: TileMapConfig) {
     this.grid = grid;
@@ -29,6 +32,16 @@ export class AutoTileResolver {
   /** Update the config (e.g. when switching tileset). */
   setConfig(config: TileMapConfig): void {
     this.config = config;
+  }
+
+  /**
+   * Set an optional neighbor filter for bitmask computation.
+   * When set, a neighbor cell is considered occupied only if the filter returns true.
+   * Used by the dual-grid wall system to make wall-separated neighbors appear empty
+   * for autotile purposes without changing the visual grid occupancy values.
+   */
+  setNeighborFilter(filter: NeighborFilter | null): void {
+    this.neighborFilter = filter;
   }
 
   /**
@@ -86,16 +99,22 @@ export class AutoTileResolver {
    *   bit6 = L   (64)  — (x-1, y)
    *   bit7 = TL  (128) — (x-1, y+1)
    */
+  private isNeighborOccupied(x: number, y: number, nx: number, ny: number): boolean {
+    if (this.grid.getCell(nx, ny) !== 1) return false;
+    if (this.neighborFilter && !this.neighborFilter(x, y, nx, ny)) return false;
+    return true;
+  }
+
   private computeMask(x: number, y: number): number {
     let mask = 0;
-    if (this.grid.getCell(x, y + 1) === 1) mask |= BIT.T;
-    if (this.grid.getCell(x + 1, y + 1) === 1) mask |= BIT.TR;
-    if (this.grid.getCell(x + 1, y) === 1) mask |= BIT.R;
-    if (this.grid.getCell(x + 1, y - 1) === 1) mask |= BIT.BR;
-    if (this.grid.getCell(x, y - 1) === 1) mask |= BIT.B;
-    if (this.grid.getCell(x - 1, y - 1) === 1) mask |= BIT.BL;
-    if (this.grid.getCell(x - 1, y) === 1) mask |= BIT.L;
-    if (this.grid.getCell(x - 1, y + 1) === 1) mask |= BIT.TL;
+    if (this.isNeighborOccupied(x, y, x, y + 1)) mask |= BIT.T;
+    if (this.isNeighborOccupied(x, y, x + 1, y + 1)) mask |= BIT.TR;
+    if (this.isNeighborOccupied(x, y, x + 1, y)) mask |= BIT.R;
+    if (this.isNeighborOccupied(x, y, x + 1, y - 1)) mask |= BIT.BR;
+    if (this.isNeighborOccupied(x, y, x, y - 1)) mask |= BIT.B;
+    if (this.isNeighborOccupied(x, y, x - 1, y - 1)) mask |= BIT.BL;
+    if (this.isNeighborOccupied(x, y, x - 1, y)) mask |= BIT.L;
+    if (this.isNeighborOccupied(x, y, x - 1, y + 1)) mask |= BIT.TL;
     return mask;
   }
 }

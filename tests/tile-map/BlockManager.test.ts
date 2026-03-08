@@ -1,6 +1,8 @@
 import { OccupancyGrid, GridCoord } from '../../assets/scripts/tile-map/OccupancyGrid';
 import { BlockManager } from '../../assets/scripts/tile-map/BlockManager';
 import { DualGridMapper } from '../../assets/scripts/tile-map/DualGridMapper';
+import { AutoTileResolver } from '../../assets/scripts/tile-map/AutoTileResolver';
+import { BIT, createDefaultConfig } from '../../assets/scripts/tile-map/TileMapConfig';
 import { STRIDE, visualGridSize } from '../../assets/scripts/tile-map/DualGridTypes';
 
 /** Helper: convert GridCoord[] to a Set of "x,y" strings for easy comparison */
@@ -113,7 +115,7 @@ describe('BlockManager — wall CRUD', () => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// 2. Wall-aware occupancy (3×3 border-cell model)
+// 2. Wall-aware occupancy (walls no longer zero cells; bitmask filter instead)
 // ════════════════════════════════════════════════════════════════
 
 describe('Wall-aware computeVisualOccupancy', () => {
@@ -136,50 +138,66 @@ describe('Wall-aware computeVisualOccupancy', () => {
     logicGrid.getDirtyAndClear();
   });
 
-  test('without wall: right border of (0,0) is occupied', () => {
-    // rx=2 border cells at vx=2: all occupied when no wall
+  test('without wall: border cells are occupied', () => {
     expect(mapper.computeVisualOccupancy(2, 0, logicGrid)).toBe(1);
     expect(mapper.computeVisualOccupancy(2, 1, logicGrid)).toBe(1);
     expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
   });
 
-  test('with wall: right border of (0,0) and left border of (1,0) are empty', () => {
+  test('with wall: border cells STILL occupied (walls affect bitmask, not occupancy)', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    // Right border of (0,0): vx=2
-    expect(mapper.computeVisualOccupancy(2, 0, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 1, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(0);
-    // Left border of (1,0): vx=3
-    expect(mapper.computeVisualOccupancy(3, 0, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(3, 1, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(3, 2, logicGrid)).toBe(0);
+    // All cells remain 1
+    expect(mapper.computeVisualOccupancy(2, 0, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 1, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(3, 0, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(3, 1, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(3, 2, logicGrid)).toBe(1);
   });
 
   test('without wall: top border of (0,0) is occupied', () => {
-    // ry=2 border cells at vy=2: all occupied
     expect(mapper.computeVisualOccupancy(0, 2, logicGrid)).toBe(1);
     expect(mapper.computeVisualOccupancy(1, 2, logicGrid)).toBe(1);
     expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
   });
 
-  test('with wall: top border of (0,0) and bottom border of (0,1) are empty', () => {
+  test('with wall: top/bottom border cells STILL occupied', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
-    // Top border of (0,0): vy=2
-    expect(mapper.computeVisualOccupancy(0, 2, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(1, 2, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(0);
-    // Bottom border of (0,1): vy=3
-    expect(mapper.computeVisualOccupancy(0, 3, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(1, 3, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 3, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(0, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(1, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(0, 3, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(1, 3, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 3, logicGrid)).toBe(1);
   });
 
   test('wall does not affect center cells', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    // Center of (0,0): vx=1, vy=1
     expect(mapper.computeVisualOccupancy(1, 1, logicGrid)).toBe(1);
-    // Center of (1,0): vx=4, vy=1
     expect(mapper.computeVisualOccupancy(4, 1, logicGrid)).toBe(1);
+  });
+
+  test('wall affects autotile bitmask via neighborFilter', () => {
+    const visualGrid = new OccupancyGrid(9, 9);
+    mapper.syncAll(logicGrid, visualGrid);
+
+    const resolver = new AutoTileResolver(visualGrid, createDefaultConfig());
+    resolver.setNeighborFilter(mapper.createNeighborFilter());
+
+    // Without wall: border cell (2,1) R neighbor (3,1) counts → R bit set
+    const maskBefore = resolver.resolve(2, 1).mask;
+    expect(maskBefore & BIT.R).toBeTruthy();
+
+    // Add wall
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+
+    // Border cell (2,1) R neighbor (3,1) crosses wall → R bit cleared
+    const maskAfter = resolver.resolve(2, 1).mask;
+    expect(maskAfter & BIT.R).toBeFalsy();
+
+    // Left border of (1,0): (3,1) L neighbor (2,1) crosses wall → L bit cleared
+    const maskLeft = resolver.resolve(3, 1).mask;
+    expect(maskLeft & BIT.L).toBeFalsy();
   });
 });
 
@@ -268,28 +286,28 @@ describe('syncWallChange', () => {
     mapper.syncAll(logicGrid, visualGrid);
   });
 
-  test('adding wall clears affected border cells', () => {
+  test('adding wall: visual grid stays 1, returns affected cells', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    const dirty = mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
-    expect(dirty.length).toBeGreaterThan(0);
-    // Right border of (0,0): vx=2, vy=0,1,2 should be 0
-    expect(visualGrid.getCell(2, 0)).toBe(0);
-    expect(visualGrid.getCell(2, 1)).toBe(0);
-    expect(visualGrid.getCell(2, 2)).toBe(0);
-    // Left border of (1,0): vx=3, vy=0,1,2 should be 0
-    expect(visualGrid.getCell(3, 0)).toBe(0);
-    expect(visualGrid.getCell(3, 1)).toBe(0);
-    expect(visualGrid.getCell(3, 2)).toBe(0);
+    const affected = mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
+    expect(affected.length).toBe(6);
+    // All visual cells remain 1 — wall doesn't zero occupancy
+    expect(visualGrid.getCell(2, 0)).toBe(1);
+    expect(visualGrid.getCell(2, 1)).toBe(1);
+    expect(visualGrid.getCell(2, 2)).toBe(1);
+    expect(visualGrid.getCell(3, 0)).toBe(1);
+    expect(visualGrid.getCell(3, 1)).toBe(1);
+    expect(visualGrid.getCell(3, 2)).toBe(1);
   });
 
-  test('removing wall restores affected border cells', () => {
+  test('removing wall: visual grid stays 1, returns affected cells', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
 
     bm.removeWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
+    const affected = mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
+    expect(affected.length).toBe(6);
 
-    // Should be restored to 1
+    // Still all 1
     expect(visualGrid.getCell(2, 0)).toBe(1);
     expect(visualGrid.getCell(2, 1)).toBe(1);
     expect(visualGrid.getCell(2, 2)).toBe(1);
@@ -307,14 +325,34 @@ describe('syncWallChange', () => {
     expect(visualGrid.getCell(5, 1)).toBe(1);
     expect(visualGrid.getCell(5, 2)).toBe(1);
   });
+
+  test('syncWallChange bitmask verification via resolver', () => {
+    const resolver = new AutoTileResolver(visualGrid, createDefaultConfig());
+    resolver.setNeighborFilter(mapper.createNeighborFilter());
+
+    // Before wall: border cell (2,1) has R bit
+    expect(resolver.resolve(2, 1).mask & BIT.R).toBeTruthy();
+
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+    const affected = mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
+
+    // After wall: border cell bitmask changes
+    expect(resolver.resolve(2, 1).mask & BIT.R).toBeFalsy();
+    expect(resolver.resolve(3, 1).mask & BIT.L).toBeFalsy();
+
+    // Affected list covers both sides
+    const xs = affected.map(c => c.x);
+    expect(xs).toContain(2);
+    expect(xs).toContain(3);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════
-// 5. Full integration with walls
+// 5. Full integration with walls (bitmask-based)
 // ════════════════════════════════════════════════════════════════
 
 describe('Full integration with walls', () => {
-  test('2×2 all occupied with wall: border cells are empty', () => {
+  test('2×2 all occupied with wall: all cells stay 1, bitmasks differ at boundary', () => {
     const mapper = new DualGridMapper(2, 2);
     const logicGrid = new OccupancyGrid(2, 2);
     const vSize = visualGridSize(2, 2);
@@ -341,21 +379,24 @@ describe('Full integration with walls', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     mapper.syncAll(logicGrid, visualGrid);
 
-    // Right border of (0,0): vx=2, vy=0,1,2 should be 0
-    expect(visualGrid.getCell(2, 0)).toBe(0);
-    expect(visualGrid.getCell(2, 1)).toBe(0);
-    expect(visualGrid.getCell(2, 2)).toBe(0);
-    // Left border of (1,0): vx=3, vy=0,1,2 should be 0
-    expect(visualGrid.getCell(3, 0)).toBe(0);
-    expect(visualGrid.getCell(3, 1)).toBe(0);
-    expect(visualGrid.getCell(3, 2)).toBe(0);
-    // Border between (0,1) and (1,1) should still be 1 (no wall there)
-    expect(visualGrid.getCell(2, 3)).toBe(1);
-    expect(visualGrid.getCell(2, 4)).toBe(1);
-    expect(visualGrid.getCell(2, 5)).toBe(1);
-    expect(visualGrid.getCell(3, 3)).toBe(1);
-    expect(visualGrid.getCell(3, 4)).toBe(1);
-    expect(visualGrid.getCell(3, 5)).toBe(1);
+    // All 6×6 cells STILL occupied (wall doesn't zero occupancy)
+    for (let vy = 0; vy < 6; vy++) {
+      for (let vx = 0; vx < 6; vx++) {
+        expect(visualGrid.getCell(vx, vy)).toBe(1);
+      }
+    }
+
+    // Verify bitmask difference at wall boundary via resolver
+    const resolver = new AutoTileResolver(visualGrid, createDefaultConfig());
+    resolver.setNeighborFilter(mapper.createNeighborFilter());
+
+    // Right border of (0,0) at vx=2: R bit NOT set (wall blocks)
+    expect(resolver.resolve(2, 1).mask & BIT.R).toBeFalsy();
+    // Left border of (1,0) at vx=3: L bit NOT set (wall blocks)
+    expect(resolver.resolve(3, 1).mask & BIT.L).toBeFalsy();
+    // Border between (0,1) and (1,1) at vx=2,vy=4: R bit IS set (no wall)
+    expect(resolver.resolve(2, 4).mask & BIT.R).toBeTruthy();
+    expect(resolver.resolve(3, 4).mask & BIT.L).toBeTruthy();
   });
 
   test('no blockManager: wall-unaware behavior preserved', () => {

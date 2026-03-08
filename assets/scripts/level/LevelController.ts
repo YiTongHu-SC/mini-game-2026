@@ -274,6 +274,7 @@ export class LevelController extends Component {
 
     // 7. Resolver works on the VISUAL grid
     this.resolver = new AutoTileResolver(this.visualGrid, createDefaultConfig());
+    this.resolver.setNeighborFilter(this.mapper.createNeighborFilter());
     this.targetMapper = new DualGridMapper(this.logicCols, this.logicRows, 'or');
     this.targetResolver = new AutoTileResolver(this.targetVisualGrid, createDefaultConfig());
 

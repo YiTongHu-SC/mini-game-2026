@@ -1,5 +1,8 @@
 import { OccupancyGrid, GridCoord } from '../../assets/scripts/tile-map/OccupancyGrid';
 import { DualGridMapper } from '../../assets/scripts/tile-map/DualGridMapper';
+import { AutoTileResolver } from '../../assets/scripts/tile-map/AutoTileResolver';
+import { BIT, createDefaultConfig } from '../../assets/scripts/tile-map/TileMapConfig';
+import { BlockManager } from '../../assets/scripts/tile-map/BlockManager';
 import { STRIDE, visualGridSize } from '../../assets/scripts/tile-map/DualGridTypes';
 
 /** Helper: convert GridCoord[] to a Set of "x,y" strings for easy comparison */
@@ -149,79 +152,68 @@ describe('computeVisualOccupancy (no walls)', () => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// 4. Occupancy computation with walls (border-cell zeroing)
+// 4. Occupancy computation with walls (no zeroing — walls handled by bitmask filter)
 // ════════════════════════════════════════════════════════════════
 
 describe('computeVisualOccupancy (with walls)', () => {
-  test('wall between horizontally adjacent cells zeroes border columns', () => {
+  test('wall does NOT zero border cells — all cells stay occupied', () => {
     const mapper = new DualGridMapper(2, 1);
     const logic = new OccupancyGrid(2, 1);
-    const { BlockManager } = require('../../assets/scripts/tile-map/BlockManager');
-    const bm = new BlockManager(2, 1);
-    mapper.blockManager = bm;
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
 
     logic.setCell(0, 0, 1);
     logic.setCell(1, 0, 1);
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
 
-    // Left cell (0,0): right border (rx=2) should be zeroed
-    expect(mapper.computeVisualOccupancy(0, 0, logic)).toBe(1); // rx=0
-    expect(mapper.computeVisualOccupancy(1, 0, logic)).toBe(1); // rx=1
-    expect(mapper.computeVisualOccupancy(2, 0, logic)).toBe(0); // rx=2, wall right
-
-    // Right cell (1,0): left border (rx=0) should be zeroed
-    expect(mapper.computeVisualOccupancy(3, 0, logic)).toBe(0); // rx=0, wall left
-    expect(mapper.computeVisualOccupancy(4, 0, logic)).toBe(1); // rx=1
-    expect(mapper.computeVisualOccupancy(5, 0, logic)).toBe(1); // rx=2
+    // All 6×3 visual cells should be 1
+    for (let vx = 0; vx < 6; vx++) {
+      for (let vy = 0; vy < 3; vy++) {
+        expect(mapper.computeVisualOccupancy(vx, vy, logic)).toBe(1);
+      }
+    }
   });
 
-  test('wall between vertically adjacent cells zeroes border rows', () => {
+  test('vertical wall does NOT zero border cells', () => {
     const mapper = new DualGridMapper(1, 2);
     const logic = new OccupancyGrid(1, 2);
-    const { BlockManager } = require('../../assets/scripts/tile-map/BlockManager');
-    const bm = new BlockManager(1, 2);
-    mapper.blockManager = bm;
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
 
     logic.setCell(0, 0, 1);
     logic.setCell(0, 1, 1);
     bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
 
-    // Bottom cell (0,0): top border (ry=2) should be zeroed
-    expect(mapper.computeVisualOccupancy(0, 0, logic)).toBe(1); // ry=0
-    expect(mapper.computeVisualOccupancy(0, 1, logic)).toBe(1); // ry=1
-    expect(mapper.computeVisualOccupancy(0, 2, logic)).toBe(0); // ry=2, wall above
-
-    // Top cell (0,1): bottom border (ry=0) should be zeroed
-    expect(mapper.computeVisualOccupancy(0, 3, logic)).toBe(0); // ry=0, wall below
-    expect(mapper.computeVisualOccupancy(0, 4, logic)).toBe(1); // ry=1
-    expect(mapper.computeVisualOccupancy(0, 5, logic)).toBe(1); // ry=2
+    for (let vx = 0; vx < 3; vx++) {
+      for (let vy = 0; vy < 6; vy++) {
+        expect(mapper.computeVisualOccupancy(vx, vy, logic)).toBe(1);
+      }
+    }
   });
 
-  test('corner cell zeroed when wall exists on either axis', () => {
-    const mapper = new DualGridMapper(2, 2);
-    const logic = new OccupancyGrid(2, 2);
-    const { BlockManager } = require('../../assets/scripts/tile-map/BlockManager');
-    const bm = new BlockManager(2, 2);
-    mapper.blockManager = bm;
+  test('empty logic cell remains 0 regardless of walls', () => {
+    const mapper = new DualGridMapper(2, 1);
+    const logic = new OccupancyGrid(2, 1);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
 
     logic.setCell(0, 0, 1);
-    logic.setCell(1, 0, 1);
-    logic.setCell(0, 1, 1);
-    logic.setCell(1, 1, 1);
+    // (1,0) stays empty
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
 
-    // (0,0) right border at rx=2 should be zeroed (wall to right)
-    expect(mapper.computeVisualOccupancy(2, 0, logic)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 1, logic)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 2, logic)).toBe(0);
+    // Right cell empty → all its visual cells 0
+    for (let vx = 3; vx < 6; vx++) {
+      for (let vy = 0; vy < 3; vy++) {
+        expect(mapper.computeVisualOccupancy(vx, vy, logic)).toBe(0);
+      }
+    }
   });
 
   test('no wall → border cells stay occupied', () => {
     const mapper = new DualGridMapper(2, 1);
     const logic = new OccupancyGrid(2, 1);
-    const { BlockManager } = require('../../assets/scripts/tile-map/BlockManager');
-    const bm = new BlockManager(2, 1);
-    mapper.blockManager = bm;
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
 
     logic.setCell(0, 0, 1);
     logic.setCell(1, 0, 1);
@@ -231,6 +223,98 @@ describe('computeVisualOccupancy (with walls)', () => {
         expect(mapper.computeVisualOccupancy(vx, vy, logic)).toBe(1);
       }
     }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// 4b. createNeighborFilter — wall-aware bitmask filtering
+// ════════════════════════════════════════════════════════════════
+
+describe('createNeighborFilter', () => {
+  test('same logic cell → always true', () => {
+    const mapper = new DualGridMapper(3, 3);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
+
+    const filter = mapper.createNeighborFilter();
+    // (1,1) and (2,1) both in logic (0,0) → true
+    expect(filter(1, 1, 2, 1)).toBe(true);
+    // (0,0) and (2,2) both in logic (0,0) → true
+    expect(filter(0, 0, 2, 2)).toBe(true);
+  });
+
+  test('different logic cells without wall → true', () => {
+    const mapper = new DualGridMapper(3, 3);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
+
+    const filter = mapper.createNeighborFilter();
+    // (2,1) in logic (0,0) and (3,1) in logic (1,0), no wall → true
+    expect(filter(2, 1, 3, 1)).toBe(true);
+  });
+
+  test('different logic cells with wall → false', () => {
+    const mapper = new DualGridMapper(3, 3);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+
+    const filter = mapper.createNeighborFilter();
+    // (2,1) in logic (0,0) and (3,1) in logic (1,0), wall → false
+    expect(filter(2, 1, 3, 1)).toBe(false);
+    // Reverse direction also false
+    expect(filter(3, 1, 2, 1)).toBe(false);
+  });
+
+  test('vertical wall blocks vertical border', () => {
+    const mapper = new DualGridMapper(3, 3);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
+    bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
+
+    const filter = mapper.createNeighborFilter();
+    // (1,2) in logic (0,0) and (1,3) in logic (0,1), wall → false
+    expect(filter(1, 2, 1, 3)).toBe(false);
+    // Horizontal neighbor of same row not affected
+    // (2,1) in logic (0,0) and (3,1) in logic (1,0), no wall → true
+    expect(filter(2, 1, 3, 1)).toBe(true);
+  });
+
+  test('no blockManager → always true', () => {
+    const mapper = new DualGridMapper(3, 3);
+    // no setBlockManager call
+    const filter = mapper.createNeighborFilter();
+    expect(filter(2, 1, 3, 1)).toBe(true);
+  });
+
+  test('wall affects autotile bitmask via resolver', () => {
+    const mapper = new DualGridMapper(2, 1);
+    const logic = new OccupancyGrid(2, 1);
+    const visual = new OccupancyGrid(6, 3);
+    const bm = new BlockManager();
+    mapper.setBlockManager(bm);
+
+    logic.setCell(0, 0, 1);
+    logic.setCell(1, 0, 1);
+    mapper.syncAll(logic, visual);
+
+    const resolver = new AutoTileResolver(visual, createDefaultConfig());
+    resolver.setNeighborFilter(mapper.createNeighborFilter());
+
+    // Without wall: center of (0,0) at vx=1,vy=1 should have R bit set
+    const maskNoWall = resolver.resolve(1, 1).mask;
+    expect(maskNoWall & BIT.R).toBeTruthy();
+
+    // Add wall
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+
+    // Right border of (0,0) at vx=2,vy=1: R neighbor is (3,1) in logic(1,0) → blocked
+    const maskBorder = resolver.resolve(2, 1).mask;
+    expect(maskBorder & BIT.R).toBeFalsy();
+
+    // Center of (0,0) at vx=1,vy=1: R neighbor is (2,1) in same logic cell → not blocked
+    const maskCenter = resolver.resolve(1, 1).mask;
+    expect(maskCenter & BIT.R).toBeTruthy();
   });
 });
 

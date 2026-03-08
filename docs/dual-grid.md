@@ -114,55 +114,64 @@ ly = ⌊vy / 3⌋
 - 逻辑格 occupied → 9 个表现格全部为 1
 - 逻辑格 empty → 9 个表现格全部为 0
 
-### 4.2 墙壁感知
+### 4.2 墙壁感知（bitmask 层面）
 
-当设置了 `BlockManager` 时，边界列/行的表现格会检查墙壁：
+墙壁**不改变**表现格的占用值（occupied 的逻辑格仍然 9 个全为 1）。
+墙壁通过 `AutoTileResolver` 的 `neighborFilter` 在 **bitmask 计算层面**断开相邻表现格，
+使 autotile 在墙壁边界处渲染为"边缘"瓦片而不是"内部连续"瓦片。
 
-| 位置 (rx, ry) | 检查的墙壁 | 有墙时 |
+#### neighborFilter 规则
+
+`DualGridMapper.createNeighborFilter()` 返回一个过滤函数 `(x, y, nx, ny) => boolean`：
+
+| 条件 | 返回值 | 效果 |
 |---|---|---|
-| rx=0 | 左侧墙 `(lx-1,ly)↔(lx,ly)` | → 0 |
-| rx=2 | 右侧墙 `(lx,ly)↔(lx+1,ly)` | → 0 |
-| ry=0 | 下方墙 `(lx,ly-1)↔(lx,ly)` | → 0 |
-| ry=2 | 上方墙 `(lx,ly)↔(lx,ly+1)` | → 0 |
-| rx=1, ry=1 | （中心格）无需检查 | 不受影响 |
+| 两个表现格属于同一逻辑格 | `true` | 正常计入 bitmask |
+| 两个表现格属于不同逻辑格，无墙 | `true` | 正常计入 bitmask |
+| 两个表现格属于不同逻辑格，有墙 | `false` | 该方向邻居视为空 |
+| 无 `BlockManager` | `true` | 无墙壁感知 |
 
-角落格（如 rx=0, ry=0）满足两个条件，任一方向有墙即为 0。
+配合 `TileMapConfig.applyDiagonalMask`，对角线方向在对应两个正交方向未同时占据时自动清零。
 
 ### 4.3 视觉效果示例
 
 #### 单个逻辑格 occupied
 
 ```
-# # #     ← 3×3 全部填充
-# # #
-# # #
+占用值:     bitmask 渲染:
+# # #       ╔═╗     ← 外边缘为 autotile 边界
+# # #       ║ ║
+# # #       ╚═╝
 ```
 
 #### 两个水平相邻逻辑格 occupied（无墙）
 
 ```
-# # # # # #     ← 6×3 连续填充
-# # # # # #
-# # # # # #
+占用值:           bitmask 渲染:
+# # # # # #       ╔═════╗     ← 连续内部，无边界
+# # # # # #       ║     ║
+# # # # # #       ╚═════╝
 ```
 
 #### 两个水平相邻逻辑格 occupied（有墙）
 
 ```
-# # . . # #     ← 边界列被墙壁切断（rx=2 和 rx=0 为 0）
-# # . . # #
-# # . . # #
+占用值:           bitmask 渲染:
+# # # # # #       ╔═╗╔═╗     ← 边界列 autotile 渲染为边缘
+# # # # # #       ║ ║║ ║       （占用值仍全部为 1）
+# # # # # #       ╚═╝╚═╝
 ```
 
 #### 2×2 逻辑格全部 occupied（无墙）
 
 ```
-# # # # # #     ← 6×6 连续填充
-# # # # # #
-# # # # # #
-# # # # # #
-# # # # # #
-# # # # # #
+占用值:           bitmask 渲染:
+# # # # # #       ╔═════╗
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ╚═════╝
 ```
 
 ---
@@ -322,41 +331,50 @@ ly = ⌊vy / 3⌋
 ### 10.1 概念
 
 **Block** 是一组连通逻辑格的集合。相邻逻辑格之间可以放置**墙壁（Wall）**，  
-墙壁会将相邻 3×3 块的边界列/行置为 0，使两个逻辑格在视觉上"断开"。
+墙壁通过 `AutoTileResolver` 的 `neighborFilter` 在 bitmask 层面断开邻接关系，  
+使两个逻辑格在视觉上渲染为独立的 autotile 边缘，而非连续内部。
 
-### 10.2 规则
+> **设计要点**：墙壁不改变 `visualGrid` 的占用值（始终为 1），  
+> 仅影响 `computeMask()` 中的邻居判定。这保证了两个相邻 3×3 块  
+> 各自完整渲染 9 个 sprite，不会出现空缺间隙。
 
-| 表现格位置 | 无墙（默认） | 有墙 |
-|---|---|---|
-| 中心 (rx=1, ry=1) | 跟随所属逻辑格 | 不受影响 |
-| 右边界 (rx=2) | 跟随所属逻辑格 | 右侧有墙 → 0 |
-| 左边界 (rx=0) | 跟随所属逻辑格 | 左侧有墙 → 0 |
-| 上边界 (ry=2) | 跟随所属逻辑格 | 上方有墙 → 0 |
-| 下边界 (ry=0) | 跟随所属逻辑格 | 下方有墙 → 0 |
-| 角落 (如 rx=0,ry=0) | 跟随所属逻辑格 | 任一方向有墙 → 0 |
+### 10.2 实现机制
+
+1. **`DualGridMapper.createNeighborFilter()`** — 工厂方法，返回过滤函数
+2. **`AutoTileResolver.setNeighborFilter(filter)`** — 注入过滤函数
+3. **`AutoTileResolver.computeMask()`** — 计算 8 方向 bitmask 时，通过 `isNeighborOccupied()` 同时检查 grid 值和 filter
+
+| 场景 | grid 值 | filter | bitmask 中该方向 |
+|---|---|---|---|
+| 邻居为空 | 0 | — | 0（不计入） |
+| 邻居占据，同一逻辑格 | 1 | `true` | 1（计入） |
+| 邻居占据，不同逻辑格，无墙 | 1 | `true` | 1（计入） |
+| 邻居占据，不同逻辑格，有墙 | 1 | `false` | 0（不计入 → 边缘瓦片） |
 
 ### 10.3 视觉示例
 
 #### 2×2 全占据，无墙
 
 ```
-# # # # # #     ← 6×6 连续填充
-# # # # # #
-# # # # # #
-# # # # # #
-# # # # # #
-# # # # # #
+占用值:           bitmask 渲染:
+# # # # # #       ╔═════╗
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ╚═════╝
 ```
 
 #### 2×2 全占据，(0,0)↔(1,0) 之间有墙
 
 ```
-# # . . # #     ← 右侧边界(rx=2)和左侧边界(rx=0)被墙切断
-# # . . # #
-# # . . # #
-# # # # # #     ← 上面两个逻辑格之间无墙，正常连接
-# # # # # #
-# # # # # #
+占用值:           bitmask 渲染:
+# # # # # #       ╔═╗╔═╗     ← 底部两格被墙分隔，各自渲染边缘
+# # # # # #       ║ ║║ ║
+# # # # # #       ║ ╠╣ ║     ← 与上方无墙的格连接处
+# # # # # #       ║     ║
+# # # # # #       ║     ║
+# # # # # #       ╚═════╝
 ```
 
 ```
@@ -388,13 +406,13 @@ ly = ⌊vy / 3⌋
 | 文件 | 路径 | Cocos 依赖 | Jest 可测 | 职责 |
 |---|---|---|---|---|
 | `BlockManager.ts` | `assets/scripts/tile-map/` | ❌ | ✅ | 墙壁存储、CRUD、邻接验证 |
-| `BlockManager.test.ts` | `tests/tile-map/` | ❌ | ✅ | 墙壁 CRUD + 边界格置零 + 同步测试 |
+| `BlockManager.test.ts` | `tests/tile-map/` | ❌ | ✅ | 墙壁 CRUD + bitmask filter 验证 + 同步测试 |
 
 ### 12.2 修改文件（Block/Wall）
 
 | 文件 | 修改内容 |
 |---|---|
-| `DualGridMapper.ts` | `blockManager` 字段、边界格墙壁置零、`getAffectedVisualCellsForWall`、`syncWallChange` |
+| `DualGridMapper.ts` | `blockManager` 字段、`createNeighborFilter()`、`getAffectedVisualCellsForWall`、`syncWallChange` |
 | `DualGridController.ts` | 集成 `BlockManager`、墙壁指示器（右键切换已移除） |
 | `LevelController.ts` | 集成 `BlockManager`、墙壁指示器、中心坐标 `+1`、`handleWallToggle` 已禁用 |
 | `index.ts` | 新增 `BlockManager`、`WallEdge` 导出 |
@@ -404,9 +422,9 @@ ly = ⌊vy / 3⌋
 
 | # | 检查项 | 验证方式 | 状态 |
 |---|---|---|---|
-| 1 | 单元测试全部通过 | `npm test` — 206 用例（9 套件） | ✅ |
+| 1 | 单元测试全部通过 | `npm test` — 214 用例（9 套件） | ✅ |
 | 2 | 墙壁数据从关卡加载 | 关卡 JSON 含 walls 数组时正确加载 | ⬜ |
-| 3 | 墙壁视觉阻断 | 边界列/行被置为 0 | ⬜ |
+| 3 | 墙壁视觉阻断 | bitmask 边缘瓦片（neighborFilter） | ⬜ |
 | 4 | 清空功能同时清除墙壁 | Clear 按钮 | ⬜ |
 | 5 | 墙壁指示器可见 | 红色半透明矩形 | ⬜ |
 | 6 | 现有功能不受影响 | 拖放、刀切等正常 | ⬜ |
