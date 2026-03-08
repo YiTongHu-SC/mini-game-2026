@@ -113,11 +113,11 @@ describe('BlockManager — wall CRUD', () => {
 });
 
 // ════════════════════════════════════════════════════════════════
-// 2. Wall-aware occupancy (AND rule)
+// 2. Wall-aware occupancy (3×3 border-cell model)
 // ════════════════════════════════════════════════════════════════
 
-describe('Wall-aware computeVisualOccupancy (AND)', () => {
-  // 3×3 logic grid (13×13 visual)
+describe('Wall-aware computeVisualOccupancy', () => {
+  // 3×3 logic grid (9×9 visual)
   let mapper: DualGridMapper;
   let logicGrid: OccupancyGrid;
   let bm: BlockManager;
@@ -136,54 +136,50 @@ describe('Wall-aware computeVisualOccupancy (AND)', () => {
     logicGrid.getDirtyAndClear();
   });
 
-  test('without wall: v-edge between (0,0) and (1,0) is occupied', () => {
-    // V-Edge at vx=4, vy=1 between logic (0,0) and (1,0)
-    expect(mapper.computeVisualOccupancy(4, 1, logicGrid)).toBe(1);
-  });
-
-  test('with wall: v-edge between (0,0) and (1,0) is empty', () => {
-    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    expect(mapper.computeVisualOccupancy(4, 1, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(4, 2, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(4, 3, logicGrid)).toBe(0);
-  });
-
-  test('without wall: h-edge between (0,0) and (0,1) is occupied', () => {
-    // H-Edge at vx=1, vy=4 between logic (0,0) and (0,1)
-    expect(mapper.computeVisualOccupancy(1, 4, logicGrid)).toBe(1);
-  });
-
-  test('with wall: h-edge between (0,0) and (0,1) is empty', () => {
-    bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
-    expect(mapper.computeVisualOccupancy(1, 4, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(2, 4, logicGrid)).toBe(0);
-    expect(mapper.computeVisualOccupancy(3, 4, logicGrid)).toBe(0);
-  });
-
-  test('corner with no walls: occupied', () => {
-    // Corner at (4,4) — shared by (0,0), (1,0), (0,1), (1,1)
-    expect(mapper.computeVisualOccupancy(4, 4, logicGrid)).toBe(1);
-  });
-
-  test('corner with one horizontal wall: empty', () => {
-    // Wall between (0,0) and (1,0) — one of the 4 adjacent pairs
-    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    expect(mapper.computeVisualOccupancy(4, 4, logicGrid)).toBe(0);
-  });
-
-  test('corner with one vertical wall: empty', () => {
-    // Wall between (0,0) and (0,1) — another of the 4 adjacent pairs
-    bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
-    expect(mapper.computeVisualOccupancy(4, 4, logicGrid)).toBe(0);
-  });
-
-  test('wall does not affect interior cells', () => {
-    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    // Interior of (0,0): vx=1..3, vy=1..3
-    expect(mapper.computeVisualOccupancy(1, 1, logicGrid)).toBe(1);
+  test('without wall: right border of (0,0) is occupied', () => {
+    // rx=2 border cells at vx=2: all occupied when no wall
+    expect(mapper.computeVisualOccupancy(2, 0, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 1, logicGrid)).toBe(1);
     expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
-    // Interior of (1,0): vx=5..7, vy=1..3
-    expect(mapper.computeVisualOccupancy(5, 1, logicGrid)).toBe(1);
+  });
+
+  test('with wall: right border of (0,0) and left border of (1,0) are empty', () => {
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+    // Right border of (0,0): vx=2
+    expect(mapper.computeVisualOccupancy(2, 0, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(2, 1, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(0);
+    // Left border of (1,0): vx=3
+    expect(mapper.computeVisualOccupancy(3, 0, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(3, 1, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(3, 2, logicGrid)).toBe(0);
+  });
+
+  test('without wall: top border of (0,0) is occupied', () => {
+    // ry=2 border cells at vy=2: all occupied
+    expect(mapper.computeVisualOccupancy(0, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(1, 2, logicGrid)).toBe(1);
+    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(1);
+  });
+
+  test('with wall: top border of (0,0) and bottom border of (0,1) are empty', () => {
+    bm.addWall({ x: 0, y: 0 }, { x: 0, y: 1 });
+    // Top border of (0,0): vy=2
+    expect(mapper.computeVisualOccupancy(0, 2, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(1, 2, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(2, 2, logicGrid)).toBe(0);
+    // Bottom border of (0,1): vy=3
+    expect(mapper.computeVisualOccupancy(0, 3, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(1, 3, logicGrid)).toBe(0);
+    expect(mapper.computeVisualOccupancy(2, 3, logicGrid)).toBe(0);
+  });
+
+  test('wall does not affect center cells', () => {
+    bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
+    // Center of (0,0): vx=1, vy=1
+    expect(mapper.computeVisualOccupancy(1, 1, logicGrid)).toBe(1);
+    // Center of (1,0): vx=4, vy=1
+    expect(mapper.computeVisualOccupancy(4, 1, logicGrid)).toBe(1);
   });
 });
 
@@ -192,33 +188,35 @@ describe('Wall-aware computeVisualOccupancy (AND)', () => {
 // ════════════════════════════════════════════════════════════════
 
 describe('getAffectedVisualCellsForWall', () => {
-  // 3×3 logic → 13×13 visual
+  // 3×3 logic → 9×9 visual
   const mapper = new DualGridMapper(3, 3);
 
-  test('horizontal wall (0,0)↔(1,0): returns 3 v-edge + 2 corner = 5', () => {
+  test('horizontal wall (0,0)↔(1,0): returns 6 border cells', () => {
     const cells = mapper.getAffectedVisualCellsForWall({ x: 0, y: 0 }, { x: 1, y: 0 });
-    expect(cells).toHaveLength(5);
+    expect(cells).toHaveLength(6);
     const set = coordSet(cells);
-    // 3 V-Edge cells at vx=4, vy=1,2,3
-    expect(set.has('4,1')).toBe(true);
-    expect(set.has('4,2')).toBe(true);
-    expect(set.has('4,3')).toBe(true);
-    // 2 Corner cells at (4,0) and (4,4)
-    expect(set.has('4,0')).toBe(true);
-    expect(set.has('4,4')).toBe(true);
+    // Left cell right border: vx=2, vy=0,1,2
+    expect(set.has('2,0')).toBe(true);
+    expect(set.has('2,1')).toBe(true);
+    expect(set.has('2,2')).toBe(true);
+    // Right cell left border: vx=3, vy=0,1,2
+    expect(set.has('3,0')).toBe(true);
+    expect(set.has('3,1')).toBe(true);
+    expect(set.has('3,2')).toBe(true);
   });
 
-  test('vertical wall (1,0)↔(1,1): returns 3 h-edge + 2 corner = 5', () => {
+  test('vertical wall (1,0)↔(1,1): returns 6 border cells', () => {
     const cells = mapper.getAffectedVisualCellsForWall({ x: 1, y: 0 }, { x: 1, y: 1 });
-    expect(cells).toHaveLength(5);
+    expect(cells).toHaveLength(6);
     const set = coordSet(cells);
-    // 3 H-Edge cells at vy=4, vx=5,6,7
-    expect(set.has('5,4')).toBe(true);
-    expect(set.has('6,4')).toBe(true);
-    expect(set.has('7,4')).toBe(true);
-    // 2 Corner cells at (4,4) and (8,4)
-    expect(set.has('4,4')).toBe(true);
-    expect(set.has('8,4')).toBe(true);
+    // Bottom cell top border: vy=2, vx=3,4,5
+    expect(set.has('3,2')).toBe(true);
+    expect(set.has('4,2')).toBe(true);
+    expect(set.has('5,2')).toBe(true);
+    // Top cell bottom border: vy=3, vx=3,4,5
+    expect(set.has('3,3')).toBe(true);
+    expect(set.has('4,3')).toBe(true);
+    expect(set.has('5,3')).toBe(true);
   });
 
   test('non-adjacent pair returns empty', () => {
@@ -226,18 +224,19 @@ describe('getAffectedVisualCellsForWall', () => {
     expect(cells).toHaveLength(0);
   });
 
-  test('boundary wall still returns valid cells (filtered)', () => {
-    // Wall between (0,0) and (0,1) — left edge
+  test('boundary wall still returns valid cells', () => {
+    // Wall between (0,0) and (0,1)
     const cells = mapper.getAffectedVisualCellsForWall({ x: 0, y: 0 }, { x: 0, y: 1 });
-    expect(cells).toHaveLength(5);
+    expect(cells).toHaveLength(6);
     const set = coordSet(cells);
-    // 3 H-Edge at vy=4, vx=1,2,3
-    expect(set.has('1,4')).toBe(true);
-    expect(set.has('2,4')).toBe(true);
-    expect(set.has('3,4')).toBe(true);
-    // 2 Corners at (0,4) and (4,4)
-    expect(set.has('0,4')).toBe(true);
-    expect(set.has('4,4')).toBe(true);
+    // Bottom cell top border: vy=2, vx=0,1,2
+    expect(set.has('0,2')).toBe(true);
+    expect(set.has('1,2')).toBe(true);
+    expect(set.has('2,2')).toBe(true);
+    // Top cell bottom border: vy=3, vx=0,1,2
+    expect(set.has('0,3')).toBe(true);
+    expect(set.has('1,3')).toBe(true);
+    expect(set.has('2,3')).toBe(true);
   });
 });
 
@@ -269,20 +268,21 @@ describe('syncWallChange', () => {
     mapper.syncAll(logicGrid, visualGrid);
   });
 
-  test('adding wall clears affected edge cells', () => {
+  test('adding wall clears affected border cells', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     const dirty = mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
     expect(dirty.length).toBeGreaterThan(0);
-    // V-Edge cells at vx=4, vy=1,2,3 should now be 0
-    expect(visualGrid.getCell(4, 1)).toBe(0);
-    expect(visualGrid.getCell(4, 2)).toBe(0);
-    expect(visualGrid.getCell(4, 3)).toBe(0);
-    // Corner at (4,0) on boundary is already 0
-    // Corner at (4,4) should be 0 due to wall
-    expect(visualGrid.getCell(4, 4)).toBe(0);
+    // Right border of (0,0): vx=2, vy=0,1,2 should be 0
+    expect(visualGrid.getCell(2, 0)).toBe(0);
+    expect(visualGrid.getCell(2, 1)).toBe(0);
+    expect(visualGrid.getCell(2, 2)).toBe(0);
+    // Left border of (1,0): vx=3, vy=0,1,2 should be 0
+    expect(visualGrid.getCell(3, 0)).toBe(0);
+    expect(visualGrid.getCell(3, 1)).toBe(0);
+    expect(visualGrid.getCell(3, 2)).toBe(0);
   });
 
-  test('removing wall restores affected edge cells', () => {
+  test('removing wall restores affected border cells', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
 
@@ -290,19 +290,22 @@ describe('syncWallChange', () => {
     mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
 
     // Should be restored to 1
-    expect(visualGrid.getCell(4, 1)).toBe(1);
-    expect(visualGrid.getCell(4, 2)).toBe(1);
-    expect(visualGrid.getCell(4, 3)).toBe(1);
+    expect(visualGrid.getCell(2, 0)).toBe(1);
+    expect(visualGrid.getCell(2, 1)).toBe(1);
+    expect(visualGrid.getCell(2, 2)).toBe(1);
+    expect(visualGrid.getCell(3, 0)).toBe(1);
+    expect(visualGrid.getCell(3, 1)).toBe(1);
+    expect(visualGrid.getCell(3, 2)).toBe(1);
   });
 
-  test('wall does not affect unrelated edges', () => {
+  test('wall does not affect unrelated borders', () => {
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     mapper.syncWallChange({ x: 0, y: 0 }, { x: 1, y: 0 }, logicGrid, visualGrid);
 
-    // V-Edge between (1,0) and (2,0): vx=8, vy=1,2,3 — should still be 1
-    expect(visualGrid.getCell(8, 1)).toBe(1);
-    expect(visualGrid.getCell(8, 2)).toBe(1);
-    expect(visualGrid.getCell(8, 3)).toBe(1);
+    // Right border of (1,0) → left border of (2,0): vx=5 should still be 1
+    expect(visualGrid.getCell(5, 0)).toBe(1);
+    expect(visualGrid.getCell(5, 1)).toBe(1);
+    expect(visualGrid.getCell(5, 2)).toBe(1);
   });
 });
 
@@ -311,7 +314,7 @@ describe('syncWallChange', () => {
 // ════════════════════════════════════════════════════════════════
 
 describe('Full integration with walls', () => {
-  test('2×2 all occupied with center wall: center corner is empty', () => {
+  test('2×2 all occupied with wall: border cells are empty', () => {
     const mapper = new DualGridMapper(2, 2);
     const logicGrid = new OccupancyGrid(2, 2);
     const vSize = visualGridSize(2, 2);
@@ -326,24 +329,33 @@ describe('Full integration with walls', () => {
     logicGrid.setCell(1, 1, 1);
     logicGrid.getDirtyAndClear();
 
-    // Center corner at (4,4) should be 1 without walls
+    // Without walls: all 6×6 should be occupied
     mapper.syncAll(logicGrid, visualGrid);
-    expect(visualGrid.getCell(4, 4)).toBe(1);
+    for (let vy = 0; vy < 6; vy++) {
+      for (let vx = 0; vx < 6; vx++) {
+        expect(visualGrid.getCell(vx, vy)).toBe(1);
+      }
+    }
 
     // Add wall between (0,0) and (1,0) — bottom row horizontal
     bm.addWall({ x: 0, y: 0 }, { x: 1, y: 0 });
     mapper.syncAll(logicGrid, visualGrid);
 
-    // Center corner at (4,4) should now be 0
-    expect(visualGrid.getCell(4, 4)).toBe(0);
-    // V-Edge at vx=4, vy=1..3 should be 0
-    expect(visualGrid.getCell(4, 1)).toBe(0);
-    expect(visualGrid.getCell(4, 2)).toBe(0);
-    expect(visualGrid.getCell(4, 3)).toBe(0);
-    // V-Edge at vx=4, vy=5..7 should still be 1 (no wall between (0,1) and (1,1))
-    expect(visualGrid.getCell(4, 5)).toBe(1);
-    expect(visualGrid.getCell(4, 6)).toBe(1);
-    expect(visualGrid.getCell(4, 7)).toBe(1);
+    // Right border of (0,0): vx=2, vy=0,1,2 should be 0
+    expect(visualGrid.getCell(2, 0)).toBe(0);
+    expect(visualGrid.getCell(2, 1)).toBe(0);
+    expect(visualGrid.getCell(2, 2)).toBe(0);
+    // Left border of (1,0): vx=3, vy=0,1,2 should be 0
+    expect(visualGrid.getCell(3, 0)).toBe(0);
+    expect(visualGrid.getCell(3, 1)).toBe(0);
+    expect(visualGrid.getCell(3, 2)).toBe(0);
+    // Border between (0,1) and (1,1) should still be 1 (no wall there)
+    expect(visualGrid.getCell(2, 3)).toBe(1);
+    expect(visualGrid.getCell(2, 4)).toBe(1);
+    expect(visualGrid.getCell(2, 5)).toBe(1);
+    expect(visualGrid.getCell(3, 3)).toBe(1);
+    expect(visualGrid.getCell(3, 4)).toBe(1);
+    expect(visualGrid.getCell(3, 5)).toBe(1);
   });
 
   test('no blockManager: wall-unaware behavior preserved', () => {
@@ -361,11 +373,11 @@ describe('Full integration with walls', () => {
 
     mapper.syncAll(logicGrid, visualGrid);
 
-    // V-Edge at vx=4, vy=1..3 should be 1 (no wall awareness)
-    expect(visualGrid.getCell(4, 1)).toBe(1);
-    expect(visualGrid.getCell(4, 2)).toBe(1);
-    expect(visualGrid.getCell(4, 3)).toBe(1);
-    // Corner at (4,4) should be 1
-    expect(visualGrid.getCell(4, 4)).toBe(1);
+    // All 6×6 should be occupied (no wall awareness)
+    for (let vy = 0; vy < 6; vy++) {
+      for (let vx = 0; vx < 6; vx++) {
+        expect(visualGrid.getCell(vx, vy)).toBe(1);
+      }
+    }
   });
 });

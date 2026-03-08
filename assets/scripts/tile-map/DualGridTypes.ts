@@ -3,7 +3,7 @@
  *
  * 定义双网格（逻辑网格 + 表现网格）的类型、常量和工具函数。
  * 逻辑网格尺寸更大（用于数据/交互/连通），表现网格更小（仅视觉）。
- * 每个逻辑格对应 3×3 内部表现格 + 共享的 edge/corner 表现格。
+ * 每个逻辑格对应 3×3 表现格，相邻逻辑格之间不共享边界。
  *
  * 零 Cocos 依赖 — 可在 Jest 中直接测试。
  */
@@ -14,9 +14,9 @@ import { GridCoord } from './OccupancyGrid';
 
 /**
  * 相邻逻辑格在表现坐标系中的步幅。
- * 每个逻辑格包含 3 个内部表现列/行 + 1 个共享 edge 列/行 = 4。
+ * 每个逻辑格对应 3×3 表现格，步幅 = 3。
  */
-export const STRIDE = 4;
+export const STRIDE = 3;
 
 // ──────────────────── types ────────────────────
 
@@ -46,17 +46,17 @@ export type OccupancyRule = 'and' | 'or';
 /**
  * 根据逻辑网格尺寸计算表现网格尺寸。
  *
- *   V_cols = L_cols × STRIDE + 1
- *   V_rows = L_rows × STRIDE + 1
+ *   V_cols = L_cols × STRIDE
+ *   V_rows = L_rows × STRIDE
  *
- * 例：逻辑 5×5 → 表现 21×21
+ * 例：逻辑 5×5 → 表现 15×15
  */
 export function visualGridSize(
   logicCols: number,
   logicRows: number,
 ): { cols: number; rows: number } {
   return {
-    cols: logicCols * STRIDE + 1,
-    rows: logicRows * STRIDE + 1,
+    cols: logicCols * STRIDE,
+    rows: logicRows * STRIDE,
   };
 }

@@ -47,7 +47,7 @@ export class DualGridController extends Component {
   @property({ type: CCInteger, tooltip: '逻辑网格行数' })
   logicRows: number = 5;
 
-  @property({ type: CCInteger, tooltip: '表现格像素大小（逻辑格视觉大小 = 4 × 此值）' })
+  @property({ type: CCInteger, tooltip: '表现格像素大小（逻辑格视觉大小 = 3 × 此值）' })
   visualTileSize: number = 24;
 
   @property({ tooltip: '显示表现格 mask debug 标签' })
@@ -119,7 +119,7 @@ export class DualGridController extends Component {
     // 8. Load default test pattern and do initial sync
     this.loadTestPattern();
 
-    // 9. Mouse input — left-click: toggle logic cell, right-click: toggle wall
+    // 9. Mouse input — left-click: toggle logic cell
     this.node.on(Node.EventType.MOUSE_UP, this.onMouseUp, this);
 
     console.log(
@@ -141,17 +141,9 @@ export class DualGridController extends Component {
 
   // ──────────────────── mouse input ────────────────────
 
-  /**
-   * 统一鼠标输入处理：
-   *   - 左键（BUTTON_LEFT）→ 切换逻辑格占用状态
-   *   - 右键（BUTTON_RIGHT）→ 切换相邻逻辑格之间的墙壁
-   */
   private onMouseUp(event: EventMouse): void {
-    const button = event.getButton();
-    if (button === EventMouse.BUTTON_LEFT) {
+    if (event.getButton() === EventMouse.BUTTON_LEFT) {
       this.handleLogicToggle(event);
-    } else if (button === EventMouse.BUTTON_RIGHT) {
-      this.handleWallToggle(event);
     }
   }
 
@@ -180,15 +172,8 @@ export class DualGridController extends Component {
     if (!pixel) return;
 
     const logicCellSize = STRIDE * this.visualTileSize;
-    const halfVts = this.visualTileSize * 0.5;
-    const lx = Math.max(
-      0,
-      Math.min(this.logicCols - 1, Math.floor((pixel.px - halfVts) / logicCellSize)),
-    );
-    const ly = Math.max(
-      0,
-      Math.min(this.logicRows - 1, Math.floor((pixel.py - halfVts) / logicCellSize)),
-    );
+    const lx = Math.max(0, Math.min(this.logicCols - 1, Math.floor(pixel.px / logicCellSize)));
+    const ly = Math.max(0, Math.min(this.logicRows - 1, Math.floor(pixel.py / logicCellSize)));
 
     // Toggle logic cell
     const current = this.logicGrid.getCell(lx, ly);
@@ -205,70 +190,6 @@ export class DualGridController extends Component {
 
     console.log(
       `[DualGridController] Toggled logic (${lx},${ly}) → ${newVal}, ` +
-        `refreshed ${dirty.length} visual cells`,
-    );
-  }
-
-  // ──────────────────── right-click: wall toggle ────────────────────
-
-  /**
-   * 检测点击位置是否在两个逻辑格的共享边上，
-   * 如果是，则切换该边上的墙壁状态。
-   *
-   * 如果 vx%4==0 且 vy%4!=0 → V-Edge（左右两个逻辑格之间）
-   * 如果 vx%4!=0 且 vy%4==0 → H-Edge（上下两个逻辑格之间）
-   */
-  private handleWallToggle(event: EventMouse): void {
-    const pixel = this.mouseToLocalPixel(event);
-    if (!pixel) return;
-
-    const vSize = visualGridSize(this.logicCols, this.logicRows);
-    const vx = Math.floor(pixel.px / this.visualTileSize);
-    const vy = Math.floor(pixel.py / this.visualTileSize);
-
-    if (vx < 0 || vx >= vSize.cols || vy < 0 || vy >= vSize.rows) return;
-
-    const rx = vx % STRIDE;
-    const ry = vy % STRIDE;
-
-    let a: { x: number; y: number } | null = null;
-    let b: { x: number; y: number } | null = null;
-
-    if (rx === 0 && ry !== 0) {
-      // V-Edge → wall between left and right logic cells
-      const lxLeft = vx / STRIDE - 1;
-      const lxRight = vx / STRIDE;
-      const ly = Math.floor(vy / STRIDE);
-      if (lxLeft >= 0 && lxRight < this.logicCols && ly >= 0 && ly < this.logicRows) {
-        a = { x: lxLeft, y: ly };
-        b = { x: lxRight, y: ly };
-      }
-    } else if (rx !== 0 && ry === 0) {
-      // H-Edge → wall between bottom and top logic cells
-      const lx = Math.floor(vx / STRIDE);
-      const lyBottom = vy / STRIDE - 1;
-      const lyTop = vy / STRIDE;
-      if (lx >= 0 && lx < this.logicCols && lyBottom >= 0 && lyTop < this.logicRows) {
-        a = { x: lx, y: lyBottom };
-        b = { x: lx, y: lyTop };
-      }
-    }
-
-    if (!a || !b) return;
-
-    // Toggle wall
-    const hasWall = this.blockManager.toggleWall(a, b);
-    if (hasWall === null) return;
-
-    // Sync visual grid
-    const dirty = this.mapper.syncWallChange(a, b, this.logicGrid, this.visualGrid);
-    this.renderer.refreshLocal(dirty, this.resolver, this.visualGrid);
-
-    // Update wall indicator
-    this.updateWallIndicator(a, b, hasWall);
-
-    console.log(
-      `[DualGridController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
         `refreshed ${dirty.length} visual cells`,
     );
   }
@@ -303,14 +224,13 @@ export class DualGridController extends Component {
         cellNode.parent = this.overlayNode;
 
         // Position: center of logic cell's visual footprint
-        // Logic cell (lx,ly) center visual cell is (lx*STRIDE+2, ly*STRIDE+2)
-        const centerVx = lx * STRIDE + 2;
-        const centerVy = ly * STRIDE + 2;
+        // Logic cell (lx,ly) center visual cell is (lx*STRIDE+1, ly*STRIDE+1)
+        const centerVx = lx * STRIDE + 1;
+        const centerVy = ly * STRIDE + 1;
         const px = renderOffsetX + centerVx * this.visualTileSize;
         const py = renderOffsetY + centerVy * this.visualTileSize;
         cellNode.setPosition(new Vec3(px, py, 0));
 
-        // Size covers the logic cell's territory (STRIDE × STRIDE visual cells)
         const cellUT = cellNode.addComponent(UITransform);
         cellUT.setContentSize(logicCellPixelSize, logicCellPixelSize);
 
@@ -410,18 +330,19 @@ export class DualGridController extends Component {
     let height: number;
 
     if (dx !== 0) {
-      // Horizontal adjacency — V-Edge wall (vertical line)
+      // Horizontal adjacency — wall between left and right blocks
       const left = dx > 0 ? a : b;
-      centerVx = (left.x + 1) * STRIDE;
-      centerVy = left.y * STRIDE + 2; // center of the 3 edge cells
+      // Position at the pixel boundary: between left cell's last col and right cell's first col
+      centerVx = (left.x + 1) * STRIDE - 0.5;
+      centerVy = left.y * STRIDE + 1; // center of the 3×3 block
       width = this.visualTileSize;
-      height = this.visualTileSize * 3;
+      height = this.visualTileSize * STRIDE;
     } else {
-      // Vertical adjacency — H-Edge wall (horizontal line)
+      // Vertical adjacency — wall between bottom and top blocks
       const bottom = dy > 0 ? a : b;
-      centerVx = bottom.x * STRIDE + 2;
-      centerVy = (bottom.y + 1) * STRIDE;
-      width = this.visualTileSize * 3;
+      centerVx = bottom.x * STRIDE + 1;
+      centerVy = (bottom.y + 1) * STRIDE - 0.5;
+      width = this.visualTileSize * STRIDE;
       height = this.visualTileSize;
     }
 

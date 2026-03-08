@@ -486,7 +486,7 @@ export class LevelController extends Component {
       return;
     }
     if (event.getButton() === EventMouse.BUTTON_RIGHT) {
-      this.handleWallToggle(event);
+      // Wall toggle removed — walls come from level data only
     }
   }
 
@@ -520,118 +520,7 @@ export class LevelController extends Component {
     return { px: localPos.x + offsetX, py: localPos.y + offsetY };
   }
 
-  /**
-   * 检测右键点击位置是否在两个逻辑格的共享边上，
-   * 如果是，则切换该边上的墙壁状态。
-   *
-   * 如果 vx%4==0 且 vy%4!=0 → V-Edge（左右两个逻辑格之间）
-   * 如果 vx%4!=0 且 vy%4==0 → H-Edge（上下两个逻辑格之间）
-   */
-  private handleWallToggle(event: EventMouse): void {
-    const pixel = this.mouseToLocalPixel(event);
-    if (!pixel) return;
-
-    const vSize = visualGridSize(this.logicCols, this.logicRows);
-    const vx = Math.floor(pixel.px / this.visualTileSize);
-    const vy = Math.floor(pixel.py / this.visualTileSize);
-
-    if (vx < 0 || vx >= vSize.cols || vy < 0 || vy >= vSize.rows) return;
-
-    const rx = vx % STRIDE;
-    const ry = vy % STRIDE;
-
-    let a: { x: number; y: number } | null = null;
-    let b: { x: number; y: number } | null = null;
-
-    if (rx === 0 && ry !== 0) {
-      // V-Edge → wall between left and right logic cells
-      const lxLeft = vx / STRIDE - 1;
-      const lxRight = vx / STRIDE;
-      const ly = Math.floor(vy / STRIDE);
-      if (lxLeft >= 0 && lxRight < this.logicCols && ly >= 0 && ly < this.logicRows) {
-        a = { x: lxLeft, y: ly };
-        b = { x: lxRight, y: ly };
-      }
-    } else if (rx !== 0 && ry === 0) {
-      // H-Edge → wall between bottom and top logic cells
-      const lx = Math.floor(vx / STRIDE);
-      const lyBottom = vy / STRIDE - 1;
-      const lyTop = vy / STRIDE;
-      if (lx >= 0 && lx < this.logicCols && lyBottom >= 0 && lyTop < this.logicRows) {
-        a = { x: lx, y: lyBottom };
-        b = { x: lx, y: lyTop };
-      }
-    }
-
-    if (!a || !b) return;
-
-    // Toggle wall
-    const hasWall = this.blockManager.toggleWall(a, b);
-    if (hasWall === null) return;
-
-    // Sync visual grid
-    const dirty = this.mapper.syncWallChange(a, b, this.logicGrid, this.visualGrid);
-    this.renderer.refreshLocal(dirty, this.resolver, this.visualGrid);
-
-    // Update wall indicator
-    this.updateWallIndicator(a, b, hasWall);
-
-    // ── Block internal wall management ──
-    const blockIdA = this.blockRegistry.getBlockIdAt(a.x, a.y);
-    const blockIdB = this.blockRegistry.getBlockIdAt(b.x, b.y);
-    const isSameBlock = blockIdA !== undefined && blockIdA === blockIdB;
-
-    if (hasWall && isSameBlock) {
-      // 同 block 内添加墙壁 → 存储到 block 内部 wall + 检查连通性
-      this.blockRegistry.addBlockWall(a, b);
-      const splitResult = this.blockRegistry.trySplitBlock(a, b);
-      if (splitResult) {
-        const [newIdA, newIdB] = splitResult;
-
-        // 重建全部 wall（split 改变了 block 成员关系）
-        this.blockManager.clearWalls();
-        for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
-          this.blockManager.addWall(wa, wb);
-        }
-
-        // 全量同步 + 刷新渲染
-        this.logicGrid.getDirtyAndClear();
-        this.mapper.syncAll(this.logicGrid, this.visualGrid);
-        this.renderer.refreshAll(this.resolver, this.visualGrid);
-        this.recomputeTargetAssignments();
-        this.refreshTargetHighlight();
-
-        // 重建 wall 指示器
-        this.clearAllWallIndicators();
-        for (const [wa, wb] of this.blockRegistry.getAllWalls()) {
-          this.addWallIndicator(wa, wb);
-        }
-
-        if (this.showLogicOverlay) this.refreshAllOverlay();
-
-        console.log(
-          `[LevelController] Block split: (${a.x},${a.y})↔(${b.x},${b.y}) → ` +
-            `'${newIdA}' (${this.blockRegistry.getBlockCells(newIdA).length} cells) + ` +
-            `'${newIdB}' (${this.blockRegistry.getBlockCells(newIdB).length} cells)`,
-        );
-        return;
-      }
-      console.log(
-        `[LevelController] Internal wall (${a.x},${a.y})↔(${b.x},${b.y}) added to block '${blockIdA}', still connected`,
-      );
-    } else if (!hasWall && isSameBlock) {
-      // 同 block 内移除墙壁 → 从 block 内部 wall 移除
-      this.blockRegistry.removeBlockWall(a, b);
-      console.log(
-        `[LevelController] Internal wall (${a.x},${a.y})↔(${b.x},${b.y}) removed from block '${blockIdA}'`,
-      );
-    } else {
-      console.log(
-        `[LevelController] Wall (${a.x},${a.y})↔(${b.x},${b.y}) → ${hasWall ? 'ON' : 'OFF'}, ` +
-          `refreshed ${dirty.length} visual cells`,
-      );
-    }
-  }
+  // handleWallToggle removed — walls come from level data only
 
   // ──────────────────── level data application ────────────────────
 
@@ -759,8 +648,8 @@ export class LevelController extends Component {
         cellNode.layer = layer;
         cellNode.parent = this.overlayNode;
 
-        const centerVx = lx * STRIDE + 2;
-        const centerVy = ly * STRIDE + 2;
+        const centerVx = lx * STRIDE + 1;
+        const centerVy = ly * STRIDE + 1;
         const px = renderOffsetX + centerVx * this.visualTileSize;
         const py = renderOffsetY + centerVy * this.visualTileSize;
         cellNode.setPosition(new Vec3(px, py, 0));
@@ -826,15 +715,8 @@ export class LevelController extends Component {
    */
   private pixelToLogicCell(px: number, py: number): { lx: number; ly: number } {
     const logicCellSize = STRIDE * this.visualTileSize;
-    const halfVts = this.visualTileSize * 0.5;
-    const lx = Math.max(
-      0,
-      Math.min(this.logicCols - 1, Math.floor((px - halfVts) / logicCellSize)),
-    );
-    const ly = Math.max(
-      0,
-      Math.min(this.logicRows - 1, Math.floor((py - halfVts) / logicCellSize)),
-    );
+    const lx = Math.max(0, Math.min(this.logicCols - 1, Math.floor(px / logicCellSize)));
+    const ly = Math.max(0, Math.min(this.logicRows - 1, Math.floor(py / logicCellSize)));
     return { lx, ly };
   }
 
@@ -846,8 +728,8 @@ export class LevelController extends Component {
     const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
     const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
     return {
-      x: renderOffsetX + (lx * STRIDE + 2) * this.visualTileSize,
-      y: renderOffsetY + (ly * STRIDE + 2) * this.visualTileSize,
+      x: renderOffsetX + (lx * STRIDE + 1) * this.visualTileSize,
+      y: renderOffsetY + (ly * STRIDE + 1) * this.visualTileSize,
     };
   }
 
@@ -876,8 +758,8 @@ export class LevelController extends Component {
       node.layer = layer;
       node.parent = this.dropPreviewLayer;
 
-      const centerVx = tx * STRIDE + 2;
-      const centerVy = ty * STRIDE + 2;
+      const centerVx = tx * STRIDE + 1;
+      const centerVy = ty * STRIDE + 1;
       node.setPosition(
         new Vec3(
           renderOffsetX + centerVx * this.visualTileSize,
@@ -1099,7 +981,7 @@ export class LevelController extends Component {
       cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
       cy =
         renderOffsetY +
-        (data.start * STRIDE + 2) * this.visualTileSize +
+        (data.start * STRIDE + 1) * this.visualTileSize +
         ((data.length - 1) * cellPx) / 2;
       w = thickness;
       h = data.length * cellPx;
@@ -1107,7 +989,7 @@ export class LevelController extends Component {
       // 横线：沿行边界 edge，覆盖列 [start, start+length)
       cx =
         renderOffsetX +
-        (data.start * STRIDE + 2) * this.visualTileSize +
+        (data.start * STRIDE + 1) * this.visualTileSize +
         ((data.length - 1) * cellPx) / 2;
       cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
       w = data.length * cellPx;
@@ -1162,14 +1044,14 @@ export class LevelController extends Component {
         cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
         cy =
           renderOffsetY +
-          (data.start * STRIDE + 2) * this.visualTileSize +
+          (data.start * STRIDE + 1) * this.visualTileSize +
           ((data.length - 1) * cellPx) / 2;
         hw = thickness / 2 + hitPad;
         hh = (data.length * cellPx) / 2 + hitPad;
       } else {
         cx =
           renderOffsetX +
-          (data.start * STRIDE + 2) * this.visualTileSize +
+          (data.start * STRIDE + 1) * this.visualTileSize +
           ((data.length - 1) * cellPx) / 2;
         cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
         hw = (data.length * cellPx) / 2 + hitPad;
@@ -1431,18 +1313,18 @@ export class LevelController extends Component {
     let height: number;
 
     if (dx !== 0) {
-      // Horizontal adjacency — V-Edge wall (vertical bar)
+      // Horizontal adjacency — V-Edge wall (vertical bar between two 3×3 blocks)
       const left = dx > 0 ? a : b;
-      centerVx = (left.x + 1) * STRIDE;
-      centerVy = left.y * STRIDE + 2;
+      centerVx = (left.x + 1) * STRIDE - 0.5;
+      centerVy = left.y * STRIDE + 1;
       width = this.visualTileSize;
-      height = this.visualTileSize * 3;
+      height = this.visualTileSize * STRIDE;
     } else {
-      // Vertical adjacency — H-Edge wall (horizontal bar)
+      // Vertical adjacency — H-Edge wall (horizontal bar between two 3×3 blocks)
       const bottom = dy > 0 ? a : b;
-      centerVx = bottom.x * STRIDE + 2;
-      centerVy = (bottom.y + 1) * STRIDE;
-      width = this.visualTileSize * 3;
+      centerVx = bottom.x * STRIDE + 1;
+      centerVy = (bottom.y + 1) * STRIDE - 0.5;
+      width = this.visualTileSize * STRIDE;
       height = this.visualTileSize;
     }
 
