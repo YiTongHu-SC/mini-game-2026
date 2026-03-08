@@ -1,0 +1,8 @@
+{
+  "thicknessRatio": 0.15,
+  "cornerRadiusRatio": 0.25,
+  "fillColor": [255, 180, 0, 200],
+  "strokeColor": [200, 120, 0, 255],
+  "strokeWidth": 2,
+  "hitPadRatio": 0.4
+}

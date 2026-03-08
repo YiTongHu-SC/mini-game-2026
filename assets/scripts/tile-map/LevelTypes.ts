@@ -38,6 +38,38 @@ export interface TargetBoxData {
   acceptBlockId?: string;
 }
 
+// ──────────────────── 刀具视觉配置 ────────────────────
+
+/**
+ * 刀具视觉样式配置（对应 knife-visual.json）。
+ *
+ * 所有 "Ratio" 字段均相对于 visualTileSize 进行换算。
+ */
+export interface KnifeVisualConfig {
+  /** 刀具粗细 = visualTileSize × thicknessRatio（默认 0.6） */
+  thicknessRatio: number;
+  /** 圆角半径 = thickness × cornerRadiusRatio（默认 0.25） */
+  cornerRadiusRatio: number;
+  /** 填充色 [r, g, b, a]（0–255）（默认 [255, 180, 0, 200]） */
+  fillColor: [number, number, number, number];
+  /** 边框色 [r, g, b, a]（0–255）（默认 [200, 120, 0, 255]） */
+  strokeColor: [number, number, number, number];
+  /** 边框宽度（像素）（默认 2） */
+  strokeWidth: number;
+  /** 命中检测扩展 = visualTileSize × hitPadRatio（默认 0.4） */
+  hitPadRatio: number;
+}
+
+/** KnifeVisualConfig 默认值（与 knife-visual.json 保持同步）。 */
+export const DEFAULT_KNIFE_VISUAL: KnifeVisualConfig = {
+  thicknessRatio: 0.6,
+  cornerRadiusRatio: 0.25,
+  fillColor: [255, 180, 0, 200],
+  strokeColor: [200, 120, 0, 255],
+  strokeWidth: 2,
+  hitPadRatio: 0.4,
+};
+
 // ──────────────────── 刀具 ────────────────────
 
 /**

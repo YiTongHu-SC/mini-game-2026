@@ -44,7 +44,14 @@ import { DualGridMapper } from '../tile-map/DualGridMapper';
 import { BlockManager } from '../tile-map/BlockManager';
 import { STRIDE, visualGridSize } from '../tile-map/DualGridTypes';
 import { LevelLoader } from '../tile-map/LevelLoader';
-import { LevelData, CellCoord, TargetBoxData, KnifeData } from '../tile-map/LevelTypes';
+import {
+  LevelData,
+  CellCoord,
+  TargetBoxData,
+  KnifeData,
+  KnifeVisualConfig,
+  DEFAULT_KNIFE_VISUAL,
+} from '../tile-map/LevelTypes';
 import { BlockRegistry } from '../tile-map/BlockRegistry';
 import { checkTargetBoxConstraint } from '../tile-map/TargetBoxConstraint';
 import { getKnifeEdges, snapKnifePosition } from '../tile-map/KnifeEdges';
@@ -209,6 +216,7 @@ export class LevelController extends Component {
   private knives: Map<string, KnifeRuntime> = new Map();
   private knifeDragState: KnifeDragState | null = null;
   private knifeLayer!: Node;
+  private knifeVisual: KnifeVisualConfig = { ...DEFAULT_KNIFE_VISUAL };
 
   private _pendingRefresh = 2;
 
@@ -313,6 +321,9 @@ export class LevelController extends Component {
     this.buildWallIndicatorLayer();
     this.buildDragLayers();
     this.buildKnifeLayer();
+
+    // 10b. Load knife visual config (async, renders with defaults until loaded)
+    this.loadKnifeVisualConfig();
 
     // 11. 将关卡数据写入网格
     this.applyLevelData(loadResult);
@@ -937,6 +948,28 @@ export class LevelController extends Component {
 
   // ──────────────────── knife system ────────────────────
 
+  /** 从 resources/knife-visual.json 加载刀具视觉配置。 */
+  private loadKnifeVisualConfig(): void {
+    resources.load('knife-visual', JsonAsset, (err, asset) => {
+      if (err || !asset || !asset.json) {
+        console.warn('[LevelController] knife-visual.json not found, using defaults');
+        return;
+      }
+      const json = asset.json as Partial<KnifeVisualConfig>;
+      if (json.thicknessRatio !== undefined) this.knifeVisual.thicknessRatio = json.thicknessRatio;
+      if (json.cornerRadiusRatio !== undefined)
+        this.knifeVisual.cornerRadiusRatio = json.cornerRadiusRatio;
+      if (json.fillColor !== undefined) this.knifeVisual.fillColor = json.fillColor;
+      if (json.strokeColor !== undefined) this.knifeVisual.strokeColor = json.strokeColor;
+      if (json.strokeWidth !== undefined) this.knifeVisual.strokeWidth = json.strokeWidth;
+      if (json.hitPadRatio !== undefined) this.knifeVisual.hitPadRatio = json.hitPadRatio;
+      // 重新渲染所有已有刀具
+      for (const kr of this.knives.values()) {
+        this.updateKnifeNode(kr);
+      }
+    });
+  }
+
   /** 创建刀具层节点（在 start() 中调用一次）。 */
   private buildKnifeLayer(): void {
     this.knifeLayer = new Node('KnifeLayer');
@@ -971,11 +1004,12 @@ export class LevelController extends Component {
     const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
     const cellPx = STRIDE * this.visualTileSize;
 
+    const kv = this.knifeVisual;
     let cx: number;
     let cy: number;
     let w: number;
     let h: number;
-    const thickness = this.visualTileSize * 0.6;
+    const thickness = this.visualTileSize * kv.thicknessRatio;
 
     if (data.orientation === 'v') {
       // 竖线：沿列边界 edge，覆盖行 [start, start+length)
@@ -1005,13 +1039,13 @@ export class LevelController extends Component {
     const g = node.getComponent(Graphics);
     if (!g) return;
     g.clear();
-    g.fillColor = new Color(255, 180, 0, 200);
-    g.roundRect(-w / 2, -h / 2, w, h, thickness * 0.25);
+    const cornerRadius = thickness * kv.cornerRadiusRatio;
+    g.fillColor = new Color(...kv.fillColor);
+    g.roundRect(-w / 2, -h / 2, w, h, cornerRadius);
     g.fill();
-    // border
-    g.strokeColor = new Color(200, 120, 0, 255);
-    g.lineWidth = 2;
-    g.roundRect(-w / 2, -h / 2, w, h, thickness * 0.25);
+    g.strokeColor = new Color(...kv.strokeColor);
+    g.lineWidth = kv.strokeWidth;
+    g.roundRect(-w / 2, -h / 2, w, h, cornerRadius);
     g.stroke();
   }
 
@@ -1024,9 +1058,9 @@ export class LevelController extends Component {
     const renderOffsetX = -(vSize.cols * this.visualTileSize) / 2 + this.visualTileSize / 2;
     const renderOffsetY = -(vSize.rows * this.visualTileSize) / 2 + this.visualTileSize / 2;
     const cellPx = STRIDE * this.visualTileSize;
-    const thickness = this.visualTileSize * 0.6;
-    // 增大命中区域使其更易选取
-    const hitPad = this.visualTileSize * 0.4;
+    const kv = this.knifeVisual;
+    const thickness = this.visualTileSize * kv.thicknessRatio;
+    const hitPad = this.visualTileSize * kv.hitPadRatio;
 
     // 将 0-origin pixel 转为居中坐标（与 renderOffset 对齐）
     const offsetX = (vSize.cols * this.visualTileSize) / 2;
