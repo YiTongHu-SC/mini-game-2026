@@ -979,7 +979,7 @@ export class LevelController extends Component {
 
     if (data.orientation === 'v') {
       // 竖线：沿列边界 edge，覆盖行 [start, start+length)
-      cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
+      cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize - this.visualTileSize / 2;
       cy =
         renderOffsetY +
         (data.start * STRIDE + 1) * this.visualTileSize +
@@ -992,7 +992,7 @@ export class LevelController extends Component {
         renderOffsetX +
         (data.start * STRIDE + 1) * this.visualTileSize +
         ((data.length - 1) * cellPx) / 2;
-      cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
+      cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize - this.visualTileSize / 2;
       w = data.length * cellPx;
       h = thickness;
     }
@@ -1042,7 +1042,7 @@ export class LevelController extends Component {
       let hh: number;
 
       if (data.orientation === 'v') {
-        cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize;
+        cx = renderOffsetX + data.edge * STRIDE * this.visualTileSize - this.visualTileSize / 2;
         cy =
           renderOffsetY +
           (data.start * STRIDE + 1) * this.visualTileSize +
@@ -1054,7 +1054,7 @@ export class LevelController extends Component {
           renderOffsetX +
           (data.start * STRIDE + 1) * this.visualTileSize +
           ((data.length - 1) * cellPx) / 2;
-        cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize;
+        cy = renderOffsetY + data.edge * STRIDE * this.visualTileSize - this.visualTileSize / 2;
         hw = (data.length * cellPx) / 2 + hitPad;
         hh = thickness / 2 + hitPad;
       }

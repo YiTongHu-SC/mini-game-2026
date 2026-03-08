@@ -94,16 +94,16 @@ export function snapKnifePosition(
   const halfVts = tileSize * 0.5;
 
   if (orientation === 'v') {
-    // 列边界：像素 x → 最近列边界
-    const rawEdge = Math.round((px - halfVts) / cellPixel);
+    // 列边界：像素 x → 最近列边界（边界在 edge*stride*tileSize 处）
+    const rawEdge = Math.round(px / cellPixel);
     const edge = Math.max(1, Math.min(gridCols - 1, rawEdge));
     // 行位置：像素 y → 最近行，使刀具中心对齐
     const rawStart = Math.round((py - halfVts) / cellPixel - length / 2);
     const start = Math.max(0, Math.min(gridRows - length, rawStart));
     return { edge, start };
   } else {
-    // 行边界：像素 y → 最近行边界
-    const rawEdge = Math.round((py - halfVts) / cellPixel);
+    // 行边界：像素 y → 最近行边界（边界在 edge*stride*tileSize 处）
+    const rawEdge = Math.round(py / cellPixel);
     const edge = Math.max(1, Math.min(gridRows - 1, rawEdge));
     // 列位置：像素 x → 最近列
     const rawStart = Math.round((px - halfVts) / cellPixel - length / 2);

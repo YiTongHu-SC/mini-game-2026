@@ -153,4 +153,32 @@ describe('snapKnifePosition', () => {
     expect(result.edge).toBe(rows - 1); // 9
     expect(result.start).toBe(cols - 3); // 5
   });
+
+  // STRIDE=3 场景：验证边界正好在 edge*stride*tileSize 像素处
+  describe('STRIDE=3 场景', () => {
+    const s3 = 3;
+    const ts3 = 24;
+    const cellPx3 = s3 * ts3; // 72
+
+    test('竖直刀具：像素在边界处正确吸附', () => {
+      // 边界在 edge * 3 * 24 = edge * 72 处
+      // 鼠标在 edge=2 的边界 (px=144)
+      const result = snapKnifePosition('v', 2, 5, 5, 144, 108, s3, ts3);
+      expect(result.edge).toBe(2);
+    });
+
+    test('竖直刀具：边界两侧的像素吸附到正确的 edge', () => {
+      // 边界 1 在 px=72, 边界 2 在 px=144, 中点在 px=108
+      // 刚好右侧的 px=109 应吸附到 edge=2
+      const r1 = snapKnifePosition('v', 1, 5, 5, 107, 36, s3, ts3);
+      expect(r1.edge).toBe(1);
+      const r2 = snapKnifePosition('v', 1, 5, 5, 109, 36, s3, ts3);
+      expect(r2.edge).toBe(2);
+    });
+
+    test('水平刀具：像素在边界处正确吸附', () => {
+      const result = snapKnifePosition('h', 2, 5, 5, 108, 216, s3, ts3);
+      expect(result.edge).toBe(3);
+    });
+  });
 });
